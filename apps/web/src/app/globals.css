@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --border: #e4e7ec;
+  --border-strong: #d0d5dd;
+  --fg: #101828;
+  --fg-2: #475467;
+  --fg-3: #667085;
+  --primary: #2f66f0;
+  --primary-solid: #2f66f0;
+  --primary-hover: #2556d6;
+  --primary-soft: #e8effe;
+  --danger: #c4281b;
+  --danger-solid: #d42a16;
+  --danger-hover: #b92412;
+  --danger-soft: #fdeceb;
+  --danger-border: #f4c3be;
+  --warning: #96640a;
+  --warning-soft: #fff8e6;
+  --warning-border: #b7791f;
+  --success: #2a7a35;
+  --success-soft: #e7f4e9;
+  --chart-1: #104281;
+  --chart-2: #1c5cab;
+  --chart-3: #2a78d6;
+  --chart-4: #5598e7;
+  --chart-5: #86b6ef;
+  --chart-line: #2f66f0;
+  --grid: #e9ecf1;
+  --axis: #d0d5dd;
+  --overlay: rgb(16 24 40 / 0.45);
+  --shadow: 0 8px 24px rgb(16 24 40 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #0e131d;
+    --surface: #151b28;
+    --surface-2: #1a2131;
+    --border: #263048;
+    --border-strong: #344160;
+    --fg: #e8ecf4;
+    --fg-2: #aab4c8;
+    --fg-3: #8591a8;
+    --primary: #7ea1ff;
+    --primary-solid: #3d6ef0;
+    --primary-hover: #5481f5;
+    --primary-soft: #1c2a4d;
+    --danger: #f27b6f;
+    --danger-solid: #d8412f;
+    --danger-hover: #e25746;
+    --danger-soft: #3a1d1d;
+    --danger-border: #6b2d2a;
+    --warning: #e0b04a;
+    --warning-soft: #33290f;
+    --warning-border: #b7791f;
+    --success: #6ccb79;
+    --success-soft: #16301b;
+    --chart-1: #b7d3f6;
+    --chart-2: #86b6ef;
+    --chart-3: #5598e7;
+    --chart-4: #2a78d6;
+    --chart-5: #1c5cab;
+    --chart-line: #6f98ff;
+    --grid: #202a3d;
+    --axis: #344160;
+    --overlay: rgb(0 0 0 / 0.6);
+    --shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e131d;
+  --surface: #151b28;
+  --surface-2: #1a2131;
+  --border: #263048;
+  --border-strong: #344160;
+  --fg: #e8ecf4;
+  --fg-2: #aab4c8;
+  --fg-3: #8591a8;
+  --primary: #7ea1ff;
+  --primary-solid: #3d6ef0;
+  --primary-hover: #5481f5;
+  --primary-soft: #1c2a4d;
+  --danger: #f27b6f;
+  --danger-solid: #d8412f;
+  --danger-hover: #e25746;
+  --danger-soft: #3a1d1d;
+  --danger-border: #6b2d2a;
+  --warning: #e0b04a;
+  --warning-soft: #33290f;
+  --warning-border: #b7791f;
+  --success: #6ccb79;
+  --success-soft: #16301b;
+  --chart-1: #b7d3f6;
+  --chart-2: #86b6ef;
+  --chart-3: #5598e7;
+  --chart-4: #2a78d6;
+  --chart-5: #1c5cab;
+  --chart-line: #6f98ff;
+  --grid: #202a3d;
+  --axis: #344160;
+  --overlay: rgb(0 0 0 / 0.6);
+  --shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-primary: var(--primary);
+  --color-primary-solid: var(--primary-solid);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-danger: var(--danger);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-border);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-line: var(--warning-border);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: var(--overlay);
+}
+
+.sr-only-table {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.recharts-wrapper,
+.recharts-surface {
+  outline: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

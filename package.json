@@ -1,0 +1,11 @@
+{
+  "name": "emora",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/web",
+    "dev:api": "npm run dev -w apps/api",
+    "simulate": "npm run simulate -w apps/api",
+    "build": "npm run build -ws --if-present"
+  }
+}
