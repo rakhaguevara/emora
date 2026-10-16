@@ -67,7 +67,7 @@ export function seedState(now: number): AppState {
     version: STORE_VERSION,
     seededAt: now,
     facility: { name: "Pabrik Sentosa", panelName: "Panel Utama A" },
-    panel: { deviceId: "EMORA-ESP32-A01", firmware: "v2.4.1", bootedAt: now - (18 * DAY + 7 * HOUR) },
+    panel: { deviceId: "EMORA-ESP32-A01", firmware: "v2.4.1", bootedAt: now - (18 * DAY + 7 * HOUR), limitW: 15000 },
     user: { name: "Andika Rahman", initials: "AR" },
     jalur,
     offLog,

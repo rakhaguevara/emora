@@ -11,12 +11,19 @@ import { PageHeader, PageSkeleton } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { dailyEnergy, dailyPf, recommendations, savingText } from "@/lib/analytics";
 import { niceDomain } from "@/lib/chart";
+import { cn } from "@/lib/cn";
 import { PF_TARGET, TARIFF_PER_KWH } from "@/lib/constants";
 import { fmtDay, fmtDayLong, fmtNum, fmtRp } from "@/lib/format";
 import { actions, useApp, useLive } from "@/lib/store";
 import { seriesDefs, type SeriesDef } from "./seriesColors";
 
-const DAYS = 30;
+const RANGES = [
+  { days: 1, label: "1 hari" },
+  { days: 3, label: "3 hari" },
+  { days: 7, label: "7 hari" },
+  { days: 30, label: "30 hari" },
+] as const;
+const DEFAULT_DAYS = 7;
 const AXIS = { fill: "var(--fg-3)", fontSize: 11 };
 
 function Legend({ defs }: { defs: SeriesDef[] }) {
@@ -63,6 +70,7 @@ export function EnergiView() {
   const live = useLive();
   const router = useRouter();
   const [pfJalur, setPfJalur] = useState("all");
+  const [days, setDays] = useState<number>(DEFAULT_DAYS);
 
   const minute = live ? Math.floor(live.now / 60e3) : 0;
   const now = minute * 60e3;
@@ -70,12 +78,12 @@ export function EnergiView() {
   const computed = useMemo(() => {
     if (!app) return null;
     return {
-      daily: dailyEnergy(app, app.jalur, now, DAYS),
-      pf: dailyPf(app, app.jalur, now, DAYS),
+      daily: dailyEnergy(app, app.jalur, now, days),
+      pf: dailyPf(app, app.jalur, now, days),
       recs: recommendations(app, app.jalur, now),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [app?.anomalies, app?.offLog, app?.jalur, app?.seededAt, minute]);
+  }, [app?.anomalies, app?.offLog, app?.jalur, app?.seededAt, minute, days]);
 
   if (!app || !live || !computed) return <PageSkeleton />;
 
@@ -85,6 +93,8 @@ export function EnergiView() {
   const totalKwh = perJalurTotal.reduce((s, x) => s + x.kwh, 0);
   const ranked = [...perJalurTotal].sort((a, b) => b.kwh - a.kwh);
 
+  // 1–7 hari: label setiap hari; 30 hari: jarang agar tidak bertabrakan di layar kecil.
+  const xInterval = days <= 7 ? 0 : 4;
   const barData = daily.map((d) => {
     const row: Record<string, number | string> = { ts: d.ts, label: fmtDay(d.ts) };
     for (const s of defs) row[s.key] = s.jalurIds.reduce((sum, id) => sum + (d.perJalur[id] ?? 0), 0);
@@ -109,7 +119,7 @@ export function EnergiView() {
     <>
       <PageHeader
         title="Energi & Efisiensi"
-        subtitle={`Analisis ${DAYS} hari · ${period}`}
+        subtitle={`Analisis ${days} hari · ${period}`}
         actions={
           <div className="sm:text-right">
             <p className="text-xs text-fg-3">Total biaya</p>
@@ -117,6 +127,23 @@ export function EnergiView() {
           </div>
         }
       />
+
+      <div role="group" aria-label="Rentang analisis" className="mb-5 grid grid-cols-4 overflow-hidden rounded-md border border-line-strong sm:inline-grid sm:w-auto">
+        {RANGES.map((r) => (
+          <button
+            key={r.days}
+            type="button"
+            aria-pressed={days === r.days}
+            onClick={() => setDays(r.days)}
+            className={cn(
+              "h-10 border-r border-line-strong px-2 text-sm whitespace-nowrap last:border-r-0 sm:px-5",
+              days === r.days ? "bg-primary-soft font-semibold text-primary" : "bg-surface text-fg-2 hover:bg-surface-2",
+            )}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
         <Card className="relative p-5">
@@ -131,7 +158,7 @@ export function EnergiView() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }} barCategoryGap="22%">
                 <CartesianGrid stroke="var(--grid)" vertical={false} />
-                <XAxis dataKey="label" interval={4} tick={AXIS} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={10} />
+                <XAxis dataKey="label" interval={xInterval} tick={AXIS} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={10} />
                 <YAxis domain={barScale.domain} ticks={barScale.ticks} width={40} tick={AXIS} tickLine={false} axisLine={false} />
                 <Tooltip
                   isAnimationActive={false}
@@ -150,7 +177,7 @@ export function EnergiView() {
                 {defs.map((d, i) => (
                   <Bar
                     key={d.key} dataKey={d.key} stackId="kwh" fill={d.color}
-                    stroke="var(--surface)" strokeWidth={2} maxBarSize={22} isAnimationActive={false}
+                    stroke="var(--surface)" strokeWidth={2} maxBarSize={days <= 3 ? 48 : 22} isAnimationActive={false}
                     radius={i === defs.length - 1 ? [4, 4, 0, 0] : 0}
                   />
                 ))}
@@ -210,7 +237,7 @@ export function EnergiView() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={pfData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid stroke="var(--grid)" vertical={false} />
-                <XAxis dataKey="label" interval={4} tick={AXIS} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={10} />
+                <XAxis dataKey="label" interval={xInterval} tick={AXIS} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={10} />
                 <YAxis domain={[0.6, 1]} ticks={[0.6, 0.7, 0.8, 0.9, 1]} width={40} tickFormatter={(v: number) => fmtNum(v, 1)} tick={AXIS} tickLine={false} axisLine={false} />
                 <ReferenceLine y={PF_TARGET} stroke="var(--fg-3)" strokeDasharray="5 4" strokeWidth={1.25} />
                 <Tooltip

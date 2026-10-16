@@ -111,7 +111,7 @@ export interface AppState {
   version: number;
   seededAt: number;
   facility: { name: string; panelName: string };
-  panel: { deviceId: string; firmware: string; bootedAt: number };
+  panel: { deviceId: string; firmware: string; bootedAt: number; limitW: number };
   user: { name: string; initials: string };
   jalur: Jalur[];
   offLog: Record<string, Interval[]>;

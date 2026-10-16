@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { PageHeader, PageSkeleton } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { cn } from "@/lib/cn";
 import { CUT_SOURCE_LABEL, EVENT_TYPE_LABEL } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv";
-import { eventJalurLabel, eventValueText } from "@/lib/derive";
+import { eventJalurLabel, eventReviewHref, eventValueText } from "@/lib/derive";
 import { fmtDuration, fmtEventTime, fmtNum, fmtDateTimeLong } from "@/lib/format";
 import { actions, useApp, useLive } from "@/lib/store";
 import type { AlertEvent, EventType } from "@/lib/types";
@@ -128,6 +128,7 @@ export function PeringatanView() {
           {rows.map((e) => {
             const active = e.endedAt == null;
             const needsAck = active && !e.acknowledged;
+            const review = eventReviewHref(app, e, live.now);
             return (
               <li key={e.id} className={cn("border-b border-line px-4 py-3.5 last:border-b-0", needsAck && "border-l-[3px] border-l-warning-line bg-warning-soft")}>
                 <div className="flex items-center justify-between gap-3 text-[13px]">
@@ -155,15 +156,20 @@ export function PeringatanView() {
                     <span>{e.handledBy ?? "—"}</span>
                   )}
                 </div>
+                {review && (
+                  <ButtonLink href={review} size="sm" className="mt-3 w-full">
+                    Tinjau {e.type === "trip" || e.type === "warning" ? "masalah" : "jalur"}
+                  </ButtonLink>
+                )}
               </li>
             );
           })}
         </ul>
         <div className="relative hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[920px] border-collapse text-left text-[13px]">
+          <table className="w-full min-w-[1020px] border-collapse text-left text-[13px]">
             <thead>
               <tr className="border-b border-line bg-surface-2 text-[11px] tracking-wider text-fg-3 uppercase">
-                {["Waktu", "Jalur", "Jenis", "Parameter", "Nilai vs batas", "Durasi", "Status", "Ditangani oleh"].map((h) => (
+                {["Waktu", "Jalur", "Jenis", "Parameter", "Nilai vs batas", "Durasi", "Status", "Ditangani oleh", "Aksi"].map((h) => (
                   <th key={h} scope="col" className="px-4 py-3 font-semibold first:pl-5">{h}</th>
                 ))}
               </tr>
@@ -171,7 +177,7 @@ export function PeringatanView() {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-fg-3">
+                  <td colSpan={9} className="px-5 py-12 text-center text-fg-3">
                     Tidak ada kejadian untuk filter ini.
                   </td>
                 </tr>
@@ -179,6 +185,7 @@ export function PeringatanView() {
               {rows.map((e) => {
                 const active = e.endedAt == null;
                 const needsAck = active && !e.acknowledged;
+                const review = eventReviewHref(app, e, live.now);
                 return (
                   <tr key={e.id} className={cn("border-b border-line last:border-b-0", needsAck && "bg-warning-soft")}>
                     <td className={cn("py-3.5 pr-4 pl-5 whitespace-nowrap text-fg-2 tabular-nums", needsAck && "border-l-[3px] border-warning-line !pl-[17px]")}>
@@ -213,6 +220,15 @@ export function PeringatanView() {
                         </button>
                       ) : (
                         (e.handledBy ?? "—")
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 whitespace-nowrap">
+                      {review ? (
+                        <ButtonLink href={review} size="sm" aria-label={`Tinjau ${EVENT_TYPE_LABEL[e.type].toLowerCase()} ${eventJalurLabel(app, e)}`}>
+                          Tinjau
+                        </ButtonLink>
+                      ) : (
+                        <span className="text-fg-3">—</span>
                       )}
                     </td>
                   </tr>

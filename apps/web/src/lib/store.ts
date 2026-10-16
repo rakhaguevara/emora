@@ -300,7 +300,10 @@ function init() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as AppState;
-      if (parsed?.version === STORE_VERSION) app = parsed;
+      if (parsed?.version === STORE_VERSION) {
+        app = parsed;
+        app.panel.limitW ??= 15000; // state lama sebelum ada batas daya panel
+      }
     }
   } catch {
     /* data rusak: seed ulang */
@@ -540,8 +543,8 @@ export const actions = {
     setApp((st) => ({ ...st, dismissedRecs: [...st.dismissedRecs, id] }));
   },
 
-  updateFacility(name: string, panelName: string) {
-    setApp((st) => ({ ...st, facility: { name, panelName } }));
+  updateFacility(name: string, panelName: string, limitW: number) {
+    setApp((st) => ({ ...st, facility: { name, panelName }, panel: { ...st.panel, limitW } }));
     toast("Pengaturan panel disimpan", "success");
   },
 

@@ -8,6 +8,14 @@ export function fmtRp(n: number): string {
   return "Rp " + Math.round(n).toLocaleString("id-ID");
 }
 
+// "Rp 5,6 jt" / "Rp 450 rb" untuk angka besar di kartu ringkas
+export function fmtRpShort(n: number): string {
+  if (n >= 1e9) return `Rp ${fmtNum(n / 1e9, 1)} M`;
+  if (n >= 1e6) return `Rp ${fmtNum(n / 1e6, 1)} jt`;
+  if (n >= 1e3) return `Rp ${fmtNum(n / 1e3, 0)} rb`;
+  return fmtRp(n);
+}
+
 const timeFmt = new Intl.DateTimeFormat("id-ID", {
   timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 });

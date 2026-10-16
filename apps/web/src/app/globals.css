@@ -180,3 +180,77 @@ dialog::backdrop {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Radar status (Ringkasan) */
+.radar {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, currentColor 45%, transparent);
+}
+.radar > * {
+  position: absolute;
+  border-radius: 9999px;
+}
+.radar-ring {
+  inset: 25%;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+}
+.radar-ring-2 {
+  inset: 10%;
+}
+.radar-sweep {
+  inset: 0;
+  background: conic-gradient(from 0deg, transparent 0deg 250deg, color-mix(in srgb, currentColor 55%, transparent) 360deg);
+  animation: radar-spin 2.6s linear infinite;
+}
+.radar-alert .radar-sweep {
+  animation-duration: 1.2s;
+}
+.radar-ripple {
+  inset: 0;
+  border: 2px solid currentColor;
+  opacity: 0;
+  animation: radar-ping 2.6s ease-out infinite;
+}
+.radar-ripple-2 {
+  animation-delay: 1.3s;
+}
+.radar-alert .radar-ripple {
+  animation-duration: 1.2s;
+}
+.radar-alert .radar-ripple-2 {
+  animation-delay: 0.6s;
+}
+.radar-dot {
+  inset: 39%;
+  background: currentColor;
+}
+@keyframes radar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes radar-ping {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep,
+  .radar-ripple {
+    animation: none !important;
+  }
+  .radar-ripple {
+    display: none;
+  }
+}

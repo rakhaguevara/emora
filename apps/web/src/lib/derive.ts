@@ -35,3 +35,18 @@ export function eventValueText(e: AlertEvent, fmt: (n: number, d: number) => str
   const u = e.unit ? ` ${e.unit}` : "";
   return `${fmt(e.value, d)}${u} / ${fmt(e.limit, d)}${u}`;
 }
+
+const REVIEW_PARAM: Record<string, string> = { Arus: "current", Daya: "power", PF: "pf", Tegangan: "voltage", Frekuensi: "frequency" };
+
+// Tautan ke halaman detail jalur dengan grafik parameter yang bermasalah dan rentang yang mencakup waktu kejadian.
+// Null bila jalur sudah dihapus atau kejadian hanya perubahan konfigurasi.
+export function eventReviewHref(app: AppState, e: AlertEvent, now: number): string | null {
+  const j = app.jalur.find((x) => x.id === e.jalurId);
+  if (!j || e.type === "config") return null;
+  const age = Math.max(0, now - e.startedAt);
+  const range = age <= 3600e3 ? "1h" : age <= 86400e3 ? "24h" : age <= 7 * 86400e3 ? "7d" : "30d";
+  const q = new URLSearchParams({ range });
+  const param = REVIEW_PARAM[e.param];
+  if (param) q.set("param", param);
+  return `/jalur/${j.number}?${q}`;
+}
