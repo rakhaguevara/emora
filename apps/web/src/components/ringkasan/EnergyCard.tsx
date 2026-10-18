@@ -1,6 +1,7 @@
 import { cn } from "@/lib/cn";
-import { TARIFF_PER_KWH } from "@/lib/constants";
+import { currentTariff } from "@/lib/energyInfo";
 import { fmtNum, fmtRp, fmtRpShort, fmtEnergy } from "@/lib/format";
+import { costRp } from "@/lib/tariff";
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
   return (
@@ -22,6 +23,7 @@ export function EnergyCard({
   pf: number | null;
   biggest: { label: string; sharePct: number } | null;
 }) {
+  const tariff = currentTariff();
   const sign = vsYesterdayPct == null ? "" : vsYesterdayPct > 0 ? "+" : "−";
   return (
     <section className="h-full rounded-lg border border-line bg-surface p-6">
@@ -35,8 +37,8 @@ export function EnergyCard({
         </div>
         <div className="min-w-0 flex-1 border-l border-line pl-5">
           <p className="text-[15px] text-fg-2">Estimasi biaya</p>
-          <p className="mt-3 text-[26px] leading-none font-semibold whitespace-nowrap text-fg tabular-nums">{fmtRp(kwh * TARIFF_PER_KWH)}</p>
-          <p className="mt-1.5 text-xs whitespace-nowrap text-fg-3">Tarif Rp {fmtNum(TARIFF_PER_KWH, 0)}/kWh</p>
+          <p className="mt-3 text-[26px] leading-none font-semibold whitespace-nowrap text-fg tabular-nums">{fmtRp(costRp(kwh, tariff))}</p>
+          <p className="mt-1.5 text-xs whitespace-nowrap text-fg-3">{tariff.cls} · Rp {fmtNum(tariff.perKwh, 2)}/kWh{tariff.taxPct ? ` + pajak ${fmtNum(tariff.taxPct, 1)}%` : ""}</p>
         </div>
       </div>
       <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-line pt-5">
@@ -45,7 +47,7 @@ export function EnergyCard({
           value={vsYesterdayPct == null ? "—" : `${sign}${fmtNum(Math.abs(vsYesterdayPct), 1)}%`}
           tone={vsYesterdayPct == null ? undefined : vsYesterdayPct <= 0 ? "good" : "bad"}
         />
-        <Metric label="Proyeksi bulan ini" value={fmtRpShort(projectionKwh * TARIFF_PER_KWH)} />
+        <Metric label="Proyeksi bulan ini" value={fmtRpShort(costRp(projectionKwh, tariff))} />
         <Metric label="PF rata-rata" value={pf != null ? fmtNum(pf, 2) : "—"} />
         <Metric label="Beban terbesar" value={biggest ? `${biggest.label} · ${fmtNum(biggest.sharePct, 0)}%` : "—"} />
       </dl>

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
-import { AppShell } from "@/components/shell/AppShell";
 import { themeInitScript } from "@/components/shell/ThemeToggle";
+import { ToastHost } from "@/components/ui/ToastHost";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -28,7 +28,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        <AppShell>{children}</AppShell>
+        {children}
+        <ToastHost />
       </body>
     </html>
   );

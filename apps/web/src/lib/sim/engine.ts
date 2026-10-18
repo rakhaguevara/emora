@@ -1,3 +1,4 @@
+import { energyKwhLive } from "../live/energy";
 import { getHistory, integrateKwh, lowerBound, nearest } from "../live/history";
 import type { AppState, Interval, Jalur, Param, Sample } from "../types";
 
@@ -147,7 +148,8 @@ export function sampleAt(w: World, j: Jalur, t: number, withEnergy = false): Sam
 
 export function energyKwhBetween(w: World, j: Jalur, from: number, to: number): number {
   const hist = getHistory(j.sensorId);
-  if (hist) return integrateKwh(hist, from, to);
+  // Data asli: counter energi PZEM dari ringkasan Supabase; integrasi daya 24 jam hanya cadangan sebelum termuat.
+  if (hist) return energyKwhLive(from, to) ?? integrateKwh(hist, from, to);
   const step = 15 * 60e3;
   let wh = 0;
   for (let t0 = from; t0 < to; t0 += step) {

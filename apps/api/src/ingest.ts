@@ -22,6 +22,11 @@ async function getThresholds(deviceId: string): Promise<Thresholds | null> {
   return fetchThresholds(deviceId);
 }
 
+// Dipanggil setelah admin mengubah ambang, agar pembacaan berikutnya langsung memakai nilai baru.
+export function invalidateThresholds(deviceId: string) {
+  thresholdCache.delete(deviceId);
+}
+
 async function fetchThresholds(deviceId: string): Promise<Thresholds | null> {
   const { data, error } = await supabase.from('devices').select('thresholds').eq('id', deviceId).maybeSingle();
   if (error) throw error;
@@ -69,6 +74,7 @@ const PLAUSIBLE: Partial<Record<keyof Telemetry, [number, number]>> = {
   power: [0, 25_000],
   frequency: [40, 70],
   pf: [0, 1],
+  energy_wh: [0, 10_000_000], // counter PZEM maks. 9.999,99 kWh
 };
 const ELECTRICAL = ['voltage', 'current', 'power', 'energy_wh', 'frequency', 'pf', 'hourly_energy_wh'] as const;
 

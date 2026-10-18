@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 import { FeedbackHost } from "@/components/overload/FeedbackDialog";
 import { LiveAnomalyHost } from "@/components/overload/LiveAnomalyHost";
 import { OverloadHost } from "@/components/overload/OverloadHost";
-import { ToastHost } from "@/components/ui/ToastHost";
 import { BottomNav } from "./BottomNav";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
-export function AppShell({ children }: { children: ReactNode }) {
+// Kerangka halaman operator (sidebar, topbar, pop-up anomali, feedback).
+export function OperatorShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen lg:pl-[236px]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[236px] border-r border-line lg:block">
@@ -23,7 +23,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <BottomNav />
       <FeedbackHost />
-      <ToastHost />
     </div>
   );
 }

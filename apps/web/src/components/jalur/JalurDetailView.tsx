@@ -16,7 +16,7 @@ import { FREQ_MAX, FREQ_MIN, PARAM_META } from "@/lib/constants";
 import { activeEvents, jalurLabel, jalurStatus } from "@/lib/derive";
 import { dayDiff, fmtAgo, fmtHM, fmtNum, fmtTime, fmtDay, fmtSmart, fmtEnergy } from "@/lib/format";
 import { rangeStats } from "@/lib/sim/engine";
-import { actions, isLive, useApp, useLive } from "@/lib/store";
+import { isLive, useApp, useLive } from "@/lib/store";
 import type { Param } from "@/lib/types";
 import { ui } from "@/lib/ui";
 import { ConfirmRelay, type RelayAction } from "./ConfirmRelay";
@@ -24,7 +24,6 @@ import { CutModeCard } from "./CutModeCard";
 import { FeedbackInsights } from "./FeedbackInsights";
 import { MetricCard } from "./MetricCard";
 import { ParameterChart } from "./ParameterChart";
-import { ThresholdForm } from "./ThresholdForm";
 
 const PARAMS: Param[] = ["current", "voltage", "power", "pf", "frequency", ...(isLive ? (["temperature", "humidity"] as Param[]) : [])];
 const RANGES: RangeKey[] = ["1h", "24h", "7d", "30d"];
@@ -282,8 +281,6 @@ function Inner() {
         <CutModeCard jalur={j} hasHold={!!hold} />
         <FeedbackInsights app={app} />
       </div>
-
-      <ThresholdForm key={j.thresholdsChangedAt + j.id} jalur={j} />
 
       <ConfirmRelay jalur={confirmRelay ? j : null} action={confirmRelay} onClose={() => setConfirmRelay(null)} />
     </div>

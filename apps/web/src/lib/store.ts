@@ -1,20 +1,21 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { CUT_MODE_LABEL, DECISION_SEC, DEFAULT_THRESHOLDS, HARD_LIMIT_RATIO, WARN_RATIO } from "./constants";
+import { DEMO_PIN } from "./auth/actions";
+import { CUT_MODE_LABEL, DECISION_SEC, HARD_LIMIT_RATIO, WARN_RATIO } from "./constants";
 import { activeEvents, jalurLabel } from "./derive";
 import { fmtNum } from "./format";
 import { notifyChanges, vibrate } from "./live/notify";
 import {
-  ackLive, blockingAnomalies, buildLiveApp, isLiveOnline, latestEnv, clearLive, dismissRec, executeRec, getCommand, getLinkStatus, getMode, getRecs, recDeadline,
-  sendFeedback, sendRelayCommand, setDeviceMode, isSensorOk, isSynced, latestLive, LIVE_ENABLED, liveStatusKey, startLiveSync,
+  ackLive, blockingAnomalies, buildLiveApp, isLiveOnline, latestEnv, clearLive, decideRec, getCommand, getLinkStatus, getMode, getRecs, recDeadline,
+  sendFeedback, sendRelayCommand, isSensorOk, isSynced, latestLive, LIVE_ENABLED, liveStatusKey, startLiveSync,
   type LinkStatus,
 } from "./live/sync";
 import { energyKwhBetween, sampleAt, startOfDay } from "./sim/engine";
 import { seedState, STORE_VERSION } from "./sim/seed";
 import { toast } from "./toast";
 import { ui } from "./ui";
-import type { AlertEvent, AppState, Cause, CutMode, CutSource, Feedback, Hold, Jalur, LiveState, Outcome, Sample, Thresholds, Timing } from "./types";
+import type { AlertEvent, AppState, Cause, CutMode, CutSource, Feedback, Hold, Jalur, LiveState, Outcome, Sample, Timing } from "./types";
 
 // Dua mode:
 // - Demo (bawaan): semua data disimulasikan dan disimpan di localStorage.
@@ -483,25 +484,23 @@ function liveBlocked(what: string): boolean {
 }
 
 export const actions = {
-  // reason: alasan operator (wajib di mode live, dicatat di relay_commands)
-  setRelay(jalurId: string, on: boolean, reason = "") {
+  // ON/OFF relai oleh operator. reason: alasan (dicatat di relay_commands); pin: PIN kontrol operator.
+  // Gagal (PIN salah, ditolak backend) = Promise ditolak dengan pesan untuk ditampilkan di dialog.
+  async setRelay(jalurId: string, on: boolean, reason: string, pin: string): Promise<void> {
     if (LIVE_ENABLED) {
       const action = on ? "on" : "off";
       // Backend juga menolak perintah ini; dicek di sini agar tidak mengirim perintah yang pasti gagal.
       const blocking = on && getMode() === "auto" ? blockingAnomalies() : [];
       if (blocking.length) {
-        toast(`Mode otomatis: relai tidak bisa dinyalakan selama anomali ${blocking.join(", ").toLowerCase()} masih aktif`, "error");
-        return;
+        throw new Error(`Mode otomatis: relai tidak bisa dinyalakan selama anomali ${blocking.join(", ").toLowerCase()} masih aktif`);
       }
-      toast(`Mengirim perintah relai ${on ? "ON" : "OFF"} ke ESP32...`, "info");
-      sendRelayCommand(action, reason)
-        .then((c) => {
-          pendingCmd = { id: c.id, action, at: Date.now() };
-          rebuildLive();
-        })
-        .catch((err: Error) => toast(`Perintah relai gagal: ${err.message}`, "error", undefined, 0));
+      const c = await sendRelayCommand(action, reason, pin);
+      pendingCmd = { id: c.id, action, at: Date.now() };
+      rebuildLive();
+      toast(`Perintah relai ${on ? "ON" : "OFF"} dikirim ke ESP32`, "info");
       return;
     }
+    if (pin !== DEMO_PIN) throw new Error(`PIN salah. Mode demo memakai PIN ${DEMO_PIN}.`);
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j || j.relayOn === on) return;
     // Mematikan saat beban berlebih menunggu keputusan = pemutusan manual (minta feedback)
@@ -538,18 +537,9 @@ export const actions = {
     }
   },
 
+  // Mode demo: pilihan "ingat keputusan" pada dialog beban berlebih. Mode live diubah admin (halaman Admin → Perangkat).
   setCutMode(jalurId: string, mode: CutMode) {
-    if (LIVE_ENABLED) {
-      const m = mode === "auto" ? "auto" : "semi_auto";
-      if (getMode() === m) return;
-      setDeviceMode(m)
-        .then(() => {
-          rebuildLive();
-          toast(`Mode pemutusan: ${m === "auto" ? "Otomatis" : "Semi-otomatis"}`, "success");
-        })
-        .catch((err: Error) => toast(`Gagal mengubah mode: ${err.message}`, "error", undefined, 0));
-      return;
-    }
+    if (LIVE_ENABLED) return;
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j || j.cutMode === mode) return;
     const now = Date.now();
@@ -586,12 +576,12 @@ export const actions = {
     }
   },
 
-  // Mode live: tombol pada pop-up anomali
-  cutAnomaly(id: number) {
-    sendRec(id, "execute");
+  // Mode live: tombol pada pop-up anomali (wajib PIN operator)
+  cutAnomaly(id: number, pin: string) {
+    return sendRec(id, "execute", pin);
   },
-  ignoreAnomaly(id: number) {
-    sendRec(id, "dismiss");
+  ignoreAnomaly(id: number, pin: string) {
+    return sendRec(id, "dismiss", pin);
   },
 
   // Pengguna mematikan relai sendiri sebagai respons beban berlebih -> minta feedback.
@@ -673,64 +663,6 @@ export const actions = {
     toast("Notifikasi dibersihkan", "success");
   },
 
-  saveThresholds(jalurId: string, th: Thresholds) {
-    if (liveBlocked("Mengubah ambang (ubah di Supabase, tabel devices)")) return;
-    const j = app!.jalur.find((x) => x.id === jalurId);
-    if (!j) return;
-    const o = j.thresholds;
-    const changes: string[] = [];
-    if (o.voltMin !== th.voltMin) changes.push(`Tegangan min. ${fmtNum(o.voltMin, 0)} → ${fmtNum(th.voltMin, 0)} V`);
-    if (o.voltMax !== th.voltMax) changes.push(`Tegangan maks. ${fmtNum(o.voltMax, 0)} → ${fmtNum(th.voltMax, 0)} V`);
-    if (o.currentMax !== th.currentMax) changes.push(`Arus maks. ${fmtNum(o.currentMax, 1)} → ${fmtNum(th.currentMax, 1)} A`);
-    if (o.powerMax !== th.powerMax) changes.push(`Daya maks. ${fmtNum(o.powerMax, 0)} → ${fmtNum(th.powerMax, 0)} W`);
-    if (o.pfMin !== th.pfMin) changes.push(`PF min. ${fmtNum(o.pfMin, 2)} → ${fmtNum(th.pfMin, 2)}`);
-    if (o.debounceSec !== th.debounceSec) changes.push(`Debounce ${o.debounceSec} → ${th.debounceSec} dtk`);
-    if (!changes.length) return;
-    const now = Date.now();
-    const ev = makeEvent(j, {
-      type: "config", param: "Ambang", startedAt: now, endedAt: now,
-      detail: changes.join("; "), handledBy: userName(), acknowledged: true,
-    });
-    setApp((st) => ({
-      ...st,
-      jalur: st.jalur.map((x) =>
-        x.id === jalurId ? { ...x, thresholds: th, thresholdsChangedBy: st.user.name, thresholdsChangedAt: now } : x,
-      ),
-      events: [ev, ...st.events],
-    }));
-    toast(`Ambang ${jalurLabel(j)} disimpan`, "success");
-  },
-
-  addJalur(name: string, sensorId: string): Jalur | null {
-    if (liveBlocked("Menambah jalur")) return null;
-    const number = Math.max(0, ...app!.jalur.map((j) => j.number)) + 1;
-    const now = Date.now();
-    const j: Jalur = {
-      id: `j${number}`, number, name, sensorId,
-      relayOn: true, sensorOnline: true, offlineSince: null,
-      thresholds: { ...DEFAULT_THRESHOLDS }, cutMode: "ask",
-      thresholdsChangedBy: userName(), thresholdsChangedAt: now,
-      offSnapshot: null, createdAt: now,
-    };
-    setApp((st) => ({ ...st, jalur: [...st.jalur, j] }));
-    toast(`${jalurLabel(j)} ditambahkan`, "success");
-    return j;
-  },
-
-  renameJalur(jalurId: string, name: string) {
-    if (liveBlocked("Mengganti nama jalur")) return;
-    setApp((st) => ({ ...st, jalur: st.jalur.map((j) => (j.id === jalurId ? { ...j, name } : j)) }));
-    toast("Nama jalur diperbarui", "success");
-  },
-
-  removeJalur(jalurId: string) {
-    if (liveBlocked("Menghapus jalur")) return;
-    const j = app!.jalur.find((x) => x.id === jalurId);
-    if (!j) return;
-    setApp((st) => ({ ...st, jalur: st.jalur.filter((x) => x.id !== jalurId) }));
-    toast(`${jalurLabel(j)} dihapus`, "info");
-  },
-
   testConnection(jalurId: string): { ok: boolean; message: string } {
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j) return { ok: false, message: "Jalur tidak ditemukan" };
@@ -749,12 +681,6 @@ export const actions = {
     setApp((st) => ({ ...st, dismissedRecs: [...st.dismissedRecs, id] }));
   },
 
-  updateFacility(name: string, panelName: string, limitW: number) {
-    if (liveBlocked("Pengaturan panel")) return;
-    setApp((st) => ({ ...st, facility: { name, panelName }, panel: { ...st.panel, limitW } }));
-    toast("Pengaturan panel disimpan", "success");
-  },
-
   resetDemo() {
     if (liveBlocked("Setel ulang data demo")) return;
     app = seedState(Date.now());
@@ -769,16 +695,15 @@ export const actions = {
   },
 };
 
-function sendRec(id: number, op: "execute" | "dismiss") {
+async function sendRec(id: number, op: "execute" | "dismiss", pin: string) {
   if (op === "execute") userExecuted.add(id);
-  (op === "execute" ? executeRec(id) : dismissRec(id))
-    .then(() =>
-      toast(op === "execute" ? "Perintah putus relai dikirim ke ESP32" : "Rekomendasi diabaikan, relai tetap menyala", "info"),
-    )
-    .catch((err: Error) => {
-      userExecuted.delete(id);
-      toast(`Gagal: ${err.message}`, "error", undefined, 0);
-    });
+  try {
+    await decideRec(id, op, pin);
+  } catch (err) {
+    userExecuted.delete(id);
+    throw err;
+  }
+  toast(op === "execute" ? "Perintah putus relai dikirim ke ESP32" : "Rekomendasi diabaikan, relai tetap menyala", "info");
 }
 
 export const activeCount = (s: AppState) => activeEvents(s).length;

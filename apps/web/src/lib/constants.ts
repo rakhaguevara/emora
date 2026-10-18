@@ -1,8 +1,5 @@
 import type { Thresholds } from "./types";
 
-// Asumsi tarif untuk perkiraan biaya (Rp/kWh). Sesuaikan dengan tarif langganan sebenarnya.
-export const TARIFF_PER_KWH = 1458.5;
-
 export const PF_TARGET = 0.85;
 export const FREQ_MIN = 49.5;
 export const FREQ_MAX = 50.5;

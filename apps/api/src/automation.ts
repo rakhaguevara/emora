@@ -1,9 +1,9 @@
-import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { NO_TRIP, type AlertType, type Violation } from './alerts.js';
+import { actorOf, requirePin, requireUser } from './auth/guard.js';
 import {
-  controlAuth, createRelayCommand, desiredRelay, ESP32_LOCAL, operatorFrom, setRelayPolicy, SYSTEM,
-  type Actor, type Mode,
+  createRelayCommand, desiredRelay, ESP32_LOCAL, setRelayPolicy, SYSTEM, type Actor, type Mode,
 } from './relay.js';
 import { supabase } from './supabase.js';
 
@@ -13,7 +13,7 @@ import { supabase } from './supabase.js';
 // 2. Dashboard menampilkan pop-up dengan hitung mundur sesuai mode device:
 //    - 'auto'      : relai diputus otomatis setelah AUTO_CUT_SEC kecuali dibatalkan.
 //    - 'semi_auto' : pengguna memutuskan dalam DECISION_SEC; bila tidak ada keputusan, pengaman memutus relai.
-// 3. Pengguna bisa "Putus sekarang" (execute) atau "Biarkan menyala" (dismiss).
+// 3. Operator bisa "Putus sekarang" (execute) atau "Biarkan menyala" (dismiss); keduanya wajib PIN operator.
 // 4. Bila semua nilai kembali normal sebelum waktu habis, rekomendasi kedaluwarsa (expired).
 // 5. Menyalakan relai saat anomali masih aktif:
 //    - 'auto'      : ditolak sampai nilai kembali normal.
@@ -190,8 +190,30 @@ async function restore() {
   }
 }
 
+// Ganti mode respons (dipanggil route admin). false = device tidak ditemukan.
+// Pindah ke otomatis saat anomali masih aktif dan relai menyala: mulai hitung mundur pemutusan.
+export async function changeMode(deviceId: string, mode: Mode, by: Actor, log: FastifyBaseLogger): Promise<boolean> {
+  const prev = await getMode(deviceId);
+  const { data, error } = await supabase.from('devices').update({ mode }).eq('id', deviceId).select('id');
+  if (error) throw error;
+  if (!data?.length) return false;
+  modeCache.set(deviceId, { mode, at: Date.now() });
+  if (prev !== mode) {
+    const { error: e } = await supabase.from('mode_changes').insert({
+      device_id: deviceId, mode, prev_mode: prev, actor: by.actor, actor_role: by.role, actor_id: by.id ?? null,
+    });
+    if (e) throw e;
+    log.info({ deviceId, mode, actor: by.actor }, 'Mode respons diubah');
+  }
+  if (mode === 'auto' && (await desiredRelay(deviceId)) !== 'off') {
+    const active = await openTripViolations(deviceId);
+    if (active.length) await openRecommendation(deviceId, active, log);
+  }
+  return true;
+}
+
 type Params = { Params: { id: string; rid: string } };
-const modeBody = z.object({ mode: z.enum(['auto', 'semi_auto']) });
+const decisionBody = z.object({ pin: z.unknown() }).nullish();
 
 export async function startAutomation(app: FastifyInstance) {
   await restore();
@@ -207,44 +229,19 @@ export async function startAutomation(app: FastifyInstance) {
     return rec && rec.deviceId === req.params.id ? rec : null;
   };
 
-  app.post<Params>('/api/devices/:id/recommendations/:rid/execute', async (req, reply) => {
-    if (!controlAuth(req, reply)) return;
+  // Keputusan operator atas rekomendasi. Keduanya menentukan listrik putus atau tetap menyala, jadi wajib PIN.
+  const decide = (status: 'executed' | 'dismissed') => async (req: FastifyRequest<Params>, reply: FastifyReply) => {
+    const user = await requireUser(req, reply, 'operator');
+    if (!user) return;
+    if (!(await requirePin(user, decisionBody.safeParse(req.body).data?.pin, reply))) return;
     const rec = findPending(req);
     if (!rec) return reply.code(409).send({ error: 'not_pending', message: 'Rekomendasi sudah selesai' });
-    await cut(rec, 'recommendation', operatorFrom(req.body), await getMode(rec.deviceId));
+    const by = actorOf(user);
+    if (status === 'executed') await cut(rec, 'recommendation', by, await getMode(rec.deviceId));
+    else await finish(rec, 'dismissed', by);
     return { ok: true };
-  });
+  };
 
-  app.post<Params>('/api/devices/:id/recommendations/:rid/dismiss', async (req, reply) => {
-    if (!controlAuth(req, reply)) return;
-    const rec = findPending(req);
-    if (!rec) return reply.code(409).send({ error: 'not_pending', message: 'Rekomendasi sudah selesai' });
-    await finish(rec, 'dismissed', operatorFrom(req.body));
-    return { ok: true };
-  });
-
-  app.post<{ Params: { id: string } }>('/api/devices/:id/mode', async (req, reply) => {
-    if (!controlAuth(req, reply)) return;
-    const parsed = modeBody.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload', issues: parsed.error.issues });
-    const prev = await getMode(req.params.id);
-    const { data, error } = await supabase.from('devices').update({ mode: parsed.data.mode }).eq('id', req.params.id).select('id,mode');
-    if (error) throw error;
-    if (!data?.length) return reply.code(404).send({ error: 'unknown_device' });
-    modeCache.set(req.params.id, { mode: parsed.data.mode, at: Date.now() });
-    if (prev !== parsed.data.mode) {
-      const by = operatorFrom(req.body);
-      const { error: e } = await supabase.from('mode_changes').insert({
-        device_id: req.params.id, mode: parsed.data.mode, prev_mode: prev, actor: by.actor, actor_role: by.role,
-      });
-      if (e) throw e;
-      req.log.info({ deviceId: req.params.id, mode: parsed.data.mode, actor: by.actor }, 'Mode respons diubah');
-    }
-    // Pindah ke otomatis saat anomali masih aktif dan relai menyala: mulai hitung mundur pemutusan.
-    if (parsed.data.mode === 'auto' && (await desiredRelay(req.params.id)) !== 'off') {
-      const active = await openTripViolations(req.params.id);
-      if (active.length) await openRecommendation(req.params.id, active, req.log);
-    }
-    return data[0];
-  });
+  app.post<Params>('/api/devices/:id/recommendations/:rid/execute', decide('executed'));
+  app.post<Params>('/api/devices/:id/recommendations/:rid/dismiss', decide('dismissed'));
 }

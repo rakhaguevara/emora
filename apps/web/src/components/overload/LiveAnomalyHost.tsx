@@ -2,6 +2,7 @@
 
 import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
+import { isPinComplete, PinField } from "@/components/auth/PinField";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { jalurLabel } from "@/lib/derive";
@@ -57,7 +58,26 @@ export function LiveAnomalyHost() {
 function Body({ rec, left, auto, onDone }: { rec: RecRow; left: number; auto: boolean; onDone: () => void }) {
   const total = auto ? AUTO_CUT_SEC : DECISION_SEC;
   const reasons = (rec.reason ?? "Nilai di luar ambang batas").split("; ");
-  const busy = left === 0;
+  const [pin, setPin] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const busy = left === 0 || sending;
+
+  // Putus atau biarkan menyala: keduanya keputusan atas listrik, jadi wajib PIN operator.
+  const decide = async (op: "cut" | "ignore") => {
+    if (!isPinComplete(pin)) return setError("Isi PIN 6 digit");
+    setSending(true);
+    setError(null);
+    try {
+      await (op === "cut" ? actions.cutAnomaly(rec.id, pin) : actions.ignoreAnomaly(rec.id, pin));
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setPin("");
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <div>
@@ -74,9 +94,9 @@ function Body({ rec, left, auto, onDone }: { rec: RecRow; left: number; auto: bo
       <div className="mt-4">
         <div className="flex items-baseline justify-between text-[13px]">
           <span className="text-fg-2">
-            {busy ? "Memutus relai..." : auto ? "Relai diputus otomatis dalam" : "Pengaman memutus relai dalam"}
+            {left === 0 ? "Memutus relai..." : auto ? "Relai diputus otomatis dalam" : "Pengaman memutus relai dalam"}
           </span>
-          {!busy && <span className="text-2xl font-semibold text-danger tabular-nums">{left} dtk</span>}
+          {left > 0 && <span className="text-2xl font-semibold text-danger tabular-nums">{left} dtk</span>}
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-2" aria-hidden>
           <div className="h-full rounded-full bg-danger-solid transition-[width] duration-1000 ease-linear" style={{ width: `${(left / total) * 100}%` }} />
@@ -88,25 +108,15 @@ function Body({ rec, left, auto, onDone }: { rec: RecRow; left: number; auto: bo
         </p>
       </div>
 
-      <div className="mt-5 flex flex-wrap justify-end gap-2">
-        <Button
-          variant="ghost"
-          disabled={busy}
-          onClick={() => {
-            actions.ignoreAnomaly(rec.id);
-            onDone();
-          }}
-        >
+      <div className="mt-4">
+        <PinField id={`anomaly-pin-${rec.id}`} value={pin} onChange={setPin} error={error} />
+      </div>
+
+      <div className="mt-1 flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" disabled={busy} onClick={() => decide("ignore")}>
           {auto ? "Batalkan, biarkan menyala" : "Biarkan menyala"}
         </Button>
-        <Button
-          variant="danger"
-          disabled={busy}
-          onClick={() => {
-            actions.cutAnomaly(rec.id);
-            onDone();
-          }}
-        >
+        <Button variant="danger" disabled={busy} onClick={() => decide("cut")}>
           Putus relai sekarang
         </Button>
       </div>

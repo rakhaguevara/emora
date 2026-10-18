@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_THRESHOLDS } from "../constants";
-import { operatorName } from "../operator";
+import { api } from "../api";
+import { getSession, initials } from "../auth/session";
 import type { AlertEvent, AppState, Cause, CutSource, Feedback, Jalur, Outcome, PanelEnv, Thresholds, Timing } from "../types";
+import { DEFAULT_TARIFF, type Tariff } from "../tariff";
+import { syncEnergy, syncTips } from "./energy";
 import { appendHistory, getHistory, KEEP_MS, type LiveSample } from "./history";
 
 // Mode live: dashboard membaca tabel devices, readings, alerts di Supabase (kunci publishable, hanya baca).
@@ -37,6 +40,10 @@ interface DeviceRow {
   thresholds: Record<string, number> | null;
   mode: DeviceMode;
   created_at: string;
+  // Tarif (diatur admin). Belum ada bila migration 20261018010000_energy_admin.sql belum dijalankan.
+  tariff_class?: string;
+  tariff_per_kwh?: number;
+  tax_percent?: number;
 }
 export type DeviceMode = "auto" | "semi_auto";
 export interface ViolationRow {
@@ -270,47 +277,25 @@ export const getRecs = (): RecRow[] => [...recs.values()].sort((a, b) => Date.pa
 // Batas waktu hitung mundur sebuah rekomendasi menurut mode saat ini (sama dengan backend)
 export const recDeadline = (r: RecRow) => Date.parse(r.ts) + (getMode() === "auto" ? AUTO_CUT_SEC : DECISION_SEC) * 1000;
 
-// Alamat backend: NEXT_PUBLIC_EMORA_API_URL, atau host halaman ini di port 4000 (berlaku juga saat dibuka dari HP).
-function apiBase(): string {
-  return process.env.NEXT_PUBLIC_EMORA_API_URL || `${window.location.protocol}//${window.location.hostname}:4000`;
-}
+// Nama pengguna yang login (untuk tampilan; backend mencatat pelaku dari sesi, bukan dari isian browser)
+const sessionName = () => getSession()?.user.displayName ?? "Operator";
 
-// POST ke endpoint kontrol backend (header x-control-key). Nama operator selalu ikut untuk jejak audit.
-async function controlPost<T>(path: string, payload: Record<string, unknown> = {}): Promise<T> {
-  const key = process.env.NEXT_PUBLIC_EMORA_CONTROL_KEY;
-  if (!key) throw new Error("NEXT_PUBLIC_EMORA_CONTROL_KEY belum diisi di apps/web/.env.local");
-  let res: Response;
-  try {
-    res = await fetch(`${apiBase()}/api/devices/${enc(LIVE_DEVICE_ID)}/${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-control-key": key },
-      body: JSON.stringify({ actor: operatorName(), ...payload }),
-    });
-  } catch {
-    throw new Error(`backend tidak terjangkau di ${apiBase()} (npm run dev:api sudah jalan?)`);
-  }
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.message ?? body.error ?? `backend ${res.status}`);
-  return body as T;
-}
+const devicePath = (path: string) => `/api/devices/${enc(LIVE_DEVICE_ID)}/${path}`;
 
-// Kirim perintah relai ke backend. Backend menyimpannya di relay_commands; ESP32 mengambilnya tiap 1 detik.
-export async function sendRelayCommand(action: "on" | "off", reason: string): Promise<CommandRow> {
-  const body = await controlPost<CommandRow>("relay", { action, reason });
+// Kirim perintah relai ke backend (sesi operator + PIN). Backend menyimpannya di relay_commands; ESP32 mengambilnya tiap 1 detik.
+export async function sendRelayCommand(action: "on" | "off", reason: string, pin: string): Promise<CommandRow> {
+  const body = await api<CommandRow>("POST", devicePath("relay"), { action, reason, pin });
   const row: CommandRow = {
     ...body, source: "user", acked_at: null, recommendation_id: null,
-    actor: operatorName(), actor_role: "operator", reason, mode: getMode(),
+    actor: sessionName(), actor_role: "operator", reason, mode: getMode(),
   };
   commands.set(row.id, row);
   return row;
 }
 
-export async function executeRec(id: number) {
-  await controlPost(`recommendations/${id}/execute`);
-}
-
-export async function dismissRec(id: number) {
-  await controlPost(`recommendations/${id}/dismiss`);
+// Keputusan atas rekomendasi putus relai (wajib PIN operator)
+export async function decideRec(id: number, op: "execute" | "dismiss", pin: string) {
+  await api("POST", devicePath(`recommendations/${id}/${op}`), { pin });
 }
 
 // Feedback untuk kejadian pemutusan (id event: rec<id> atau local<id>)
@@ -321,25 +306,57 @@ export async function sendFeedback(
     ? { recommendation_id: Number(eventId.slice(3)) }
     : eventId.startsWith("local") ? { command_id: Number(eventId.slice(5)) } : null;
   if (!target) throw new Error("kejadian ini tidak bisa diberi feedback");
-  const row = await controlPost<{ id: number }>("feedback", { ...target, ...d });
+  const row = await api<{ id: number }>("POST", devicePath("feedback"), { ...target, ...d });
   // Tampilkan langsung tanpa menunggu polling berikutnya
   feedbackRows.set(row.id, {
     id: row.id, ts: new Date().toISOString(), recommendation_id: target.recommendation_id ?? null,
-    command_id: target.command_id ?? null, cut_source: "manual", ...d, actor: operatorName(),
+    command_id: target.command_id ?? null, cut_source: "manual", ...d, actor: sessionName(),
   });
 }
 
-export async function setDeviceMode(mode: DeviceMode) {
-  await controlPost("mode", { mode });
-  if (device) device = { ...device, mode };
-}
-
 async function syncDevice() {
-  const rows = await rest<DeviceRow[]>(
-    `devices?select=id,name,location,thresholds,mode,created_at&id=eq.${enc(LIVE_DEVICE_ID)}`,
-  );
+  // select=* agar tetap jalan sebelum kolom tarif ditambahkan migration
+  const rows = await rest<DeviceRow[]>(`devices?select=*&id=eq.${enc(LIVE_DEVICE_ID)}`);
   device = rows[0] ?? null;
   if (!device) throw new Error(`Device ${LIVE_DEVICE_ID} tidak ada di tabel devices`);
+}
+
+export const getTariff = (): Tariff =>
+  device?.tariff_per_kwh
+    ? { cls: device.tariff_class ?? DEFAULT_TARIFF.cls, perKwh: device.tariff_per_kwh, taxPct: device.tax_percent ?? 0 }
+    : DEFAULT_TARIFF;
+
+// Ringkasan energi & rekomendasi harian: tiap menit, atau segera setelah admin mengubah data.
+const ENERGY_POLL_MS = 60_000;
+let energyNotify: (() => void) | null = null;
+let energyBusy = false;
+let energyError: string | null = null;
+
+async function runEnergySync(onError: (msg: string) => void) {
+  if (energyBusy) return;
+  energyBusy = true;
+  try {
+    await Promise.all([syncEnergy(LIVE_DEVICE_ID), syncTips(LIVE_DEVICE_ID)]);
+    energyError = null;
+    energyNotify?.();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg !== energyError) onError(msg);
+    energyError = msg;
+  } finally {
+    energyBusy = false;
+  }
+}
+
+let energyOnError: (msg: string) => void = () => {};
+// Dipanggil halaman Admin setelah menyimpan tarif / rekomendasi
+export async function refreshAdminData() {
+  try {
+    await syncDevice();
+  } catch {
+    /* polling berikutnya akan mencoba lagi */
+  }
+  await runEnergySync(energyOnError);
 }
 
 function startRealtime(onChange: () => void, catchUp: () => void) {
@@ -373,6 +390,9 @@ function startRealtime(onChange: () => void, catchUp: () => void) {
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "mode_changes", filter }, (p) => {
       modeChanges.set((p.new as ModeChangeRow).id, p.new as ModeChangeRow);
       onChange();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "daily_tips", filter }, () => {
+      void syncTips(LIVE_DEVICE_ID).then(onChange, () => {});
     })
     .subscribe((status) => {
       const next: LinkStatus = status === "SUBSCRIBED" ? "realtime" : status === "CLOSED" ? "connecting" : "polling";
@@ -414,6 +434,11 @@ export function startLiveSync(onChange: () => void, onError: (msg: string) => vo
   void run(true);
   setInterval(() => void run(), POLL_MS);
   startRealtime(onChange, () => void run(true));
+
+  energyNotify = onChange;
+  energyOnError = onError;
+  void runEnergySync(onError);
+  setInterval(() => void runEnergySync(onError), ENERGY_POLL_MS);
 }
 
 function mapThresholds(t: Record<string, number> | null | undefined): Thresholds {
@@ -560,7 +585,7 @@ export function buildLiveApp(prev: AppState | null, now: number): AppState {
   const sensorOk = isSensorOk(now);
   const createdAt = device ? Date.parse(device.created_at) : now;
   const label = `Jalur 1 · ${device?.name ?? LIVE_DEVICE_ID}`;
-  const userName = operatorName();
+  const userName = sessionName();
 
   const jalur: Jalur = {
     id: "j1",
@@ -699,7 +724,7 @@ export function buildLiveApp(prev: AppState | null, now: number): AppState {
     seededAt: now,
     facility: { name: device?.location ?? "EMORA", panelName: device?.name ?? LIVE_DEVICE_ID },
     panel: { deviceId: LIVE_DEVICE_ID, firmware: "EMORA_FINAL", bootedAt: sessionStart(now), limitW: th.powerMax },
-    user: { name: userName, initials: "EM" },
+    user: { name: userName, initials: initials(userName) },
     jalur: [jalur],
     offLog: {},
     anomalies: [],

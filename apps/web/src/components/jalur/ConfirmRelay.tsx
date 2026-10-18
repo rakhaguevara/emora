@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field } from "@/components/ui/Field";
+import { isPinComplete, PinField } from "@/components/auth/PinField";
 import { Select } from "@/components/ui/Select";
 import { jalurLabel } from "@/lib/derive";
 import { blockingAnomalies } from "@/lib/live/sync";
-import { getOperator, setOperator } from "@/lib/operator";
 import { actions, isLive, liveMode } from "@/lib/store";
 import type { Jalur } from "@/lib/types";
 
@@ -19,7 +18,7 @@ const OTHER = "Lainnya";
 
 export type RelayAction = "on" | "off";
 
-// Konfirmasi ON/OFF relai. Mode live: wajib nama operator dan alasan (tercatat di jejak audit backend).
+// Konfirmasi ON/OFF relai oleh operator: wajib alasan dan PIN kontrol. Pelaku dicatat backend dari sesi login.
 export function ConfirmRelay({ jalur, action, onClose }: { jalur: Jalur | null; action: RelayAction | null; onClose: () => void }) {
   const open = !!jalur && !!action;
   return (
@@ -41,25 +40,34 @@ export function ConfirmRelay({ jalur, action, onClose }: { jalur: Jalur | null; 
 }
 
 function Form({ jalur, action, onClose }: { jalur: Jalur; action: RelayAction; onClose: () => void }) {
-  const [name, setName] = useState(getOperator);
   const [choice, setChoice] = useState("");
   const [note, setNote] = useState("");
+  const [pin, setPin] = useState("");
   const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Mode otomatis: ON ditolak selama anomali masih aktif (backend juga menolak)
   const blocking = isLive && action === "on" && liveMode() === "auto" ? blockingAnomalies() : [];
   const reason = [choice === OTHER ? "" : choice, note.trim()].filter(Boolean).join(" · ");
-  const nameErr = isLive && touched && !name.trim() ? "Isi nama operator" : null;
   const reasonErr = isLive && touched && !reason ? (choice === OTHER ? "Tulis alasannya di catatan" : "Pilih alasan") : null;
+  const pinErr = submitError ?? (touched && !isPinComplete(pin) ? "Isi PIN 6 digit" : null);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
-    if (blocking.length) return;
-    if (isLive && (!name.trim() || !reason)) return;
-    if (isLive) setOperator(name);
-    actions.setRelay(jalur.id, action === "on", reason.slice(0, 300));
-    onClose();
+    setSubmitError(null);
+    if (blocking.length || (isLive && !reason) || !isPinComplete(pin)) return;
+    setBusy(true);
+    try {
+      await actions.setRelay(jalur.id, action === "on", reason.slice(0, 300), pin);
+      onClose();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : String(err));
+      setPin("");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -72,15 +80,6 @@ function Form({ jalur, action, onClose }: { jalur: Jalur; action: RelayAction; o
       )}
       {isLive && (
         <>
-          <Field
-            label="Nama operator"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={60}
-            autoComplete="name"
-            error={nameErr}
-            hint="Tercatat di riwayat sebagai pelaku tindakan."
-          />
           <div>
             <label htmlFor="relay-reason" className="mb-1.5 block text-[13px] font-semibold text-fg">Alasan</label>
             <Select id="relay-reason" value={choice} onChange={(e) => setChoice(e.target.value)} className="w-full">
@@ -105,10 +104,11 @@ function Form({ jalur, action, onClose }: { jalur: Jalur; action: RelayAction; o
           </div>
         </>
       )}
+      <PinField value={pin} onChange={setPin} error={pinErr} autoFocus={!isLive} />
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Batal</Button>
-        <Button type="submit" variant={action === "off" ? "danger" : "primary"} disabled={blocking.length > 0}>
-          {action === "on" ? "Nyalakan relai" : "Matikan relai"}
+        <Button type="submit" variant={action === "off" ? "danger" : "primary"} disabled={blocking.length > 0 || busy}>
+          {busy ? "Mengirim..." : action === "on" ? "Nyalakan relai" : "Matikan relai"}
         </Button>
       </div>
     </form>

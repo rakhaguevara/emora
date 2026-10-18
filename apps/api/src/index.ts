@@ -1,7 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { config } from './config.js';
+import { registerAdminDeviceRoutes } from './admin/devices.js';
+import { registerAdminUserRoutes } from './admin/users.js';
+import { registerAuthRoutes } from './auth/routes.js';
 import { startAutomation } from './automation.js';
+import { registerAdminRoutes } from './admin.js';
 import { registerFeedbackRoutes } from './feedback.js';
 import { ingest, setIngestLogger, UnknownDeviceError } from './ingest.js';
 import { startMqtt } from './mqtt.js';
@@ -10,7 +14,8 @@ import { telemetrySchema } from './schema.js';
 import { supabase } from './supabase.js';
 
 const app = Fastify({ logger: true });
-await app.register(cors, { origin: true });
+// PATCH/DELETE dipakai halaman Admin; bawaan @fastify/cors hanya GET/HEAD/POST.
+await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] });
 
 app.get('/health', async () => ({ ok: true }));
 
@@ -55,8 +60,12 @@ app.get<{ Params: { id: string }; Querystring: { minutes?: string; limit?: strin
   },
 );
 
+registerAuthRoutes(app);
+registerAdminUserRoutes(app);
+registerAdminDeviceRoutes(app);
 registerRelayRoutes(app);
 registerFeedbackRoutes(app);
+registerAdminRoutes(app);
 setIngestLogger(app.log);
 await startAutomation(app);
 startMqtt(app.log);

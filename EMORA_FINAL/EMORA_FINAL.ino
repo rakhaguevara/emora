@@ -35,7 +35,7 @@
 // Alamat backend. JANGAN "localhost" (itu menunjuk ke ESP32 sendiri).
 //   Jaringan lokal : "http://192.168.1.10:4000/ingest"  (IP laptop yang menjalankan backend)
 //   Backend online : "https://api.contoh.com/ingest"
-#define API_URL          "http://10.34.216.135:4000/ingest"
+#define API_URL          "http://10.34.216.45:4000/ingest"
 
 #define DEVICE_KEY       "c8e96e5d9c86e73363ab7bc0586d435576422104d89f3d73"   // sama persis dengan INGEST_API_KEY di apps/api/.env
 #define DEVICE_ID        "emora-01"                    // sama dengan kolom id di tabel devices (Supabase)
@@ -421,7 +421,19 @@ void loop() {
     float temperature = dht.readTemperature();
     float humidity    = dht.readHumidity();
 
-    if (isnan(voltage)) {
+    // Bingkai PZEM rusak (glitch serial, pernah terbaca 2164 V / 215 juta W / PF 222) diperlakukan
+    // sama dengan gagal baca agar tidak memicu alarm atau proteksi lokal. Rentang = batas ukur PZEM-004T v3.
+    bool pzemPlausible = !isnan(voltage) && voltage <= 300.0f &&
+                         current >= 0.0f && current <= 110.0f &&
+                         power >= 0.0f && power <= 25000.0f &&
+                         frequency >= 40.0f && frequency <= 70.0f &&
+                         pf >= 0.0f && pf <= 1.0f &&
+                         energyKwh >= 0.0f && energyKwh <= 10000.0f;
+    if (!isnan(voltage) && !pzemPlausible) {
+      Serial.printf("[WARNING] Bacaan PZEM tidak masuk akal diabaikan (V=%.1f I=%.3f P=%.1f F=%.1f PF=%.2f)\n",
+                    voltage, current, power, frequency, pf);
+    }
+    if (!pzemPlausible) {
       if (!pzemFailing) {
         pzemFailing = true;
         pzemFailSince = currentMillis;

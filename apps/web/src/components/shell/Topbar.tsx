@@ -3,7 +3,7 @@
 import { Bell, BellOff, Zap } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu } from "@/components/ui/Menu";
+import { UserMenu } from "@/components/auth/UserMenu";
 import { notificationsSupported, setNavigator } from "@/lib/live/notify";
 import { actions, isLive, liveLinkStatus, useApp } from "@/lib/store";
 import { toast } from "@/lib/toast";
@@ -79,21 +79,7 @@ export function Topbar() {
       </span>
       {isLive && <NotifyButton />}
       <ThemeToggle />
-      {isLive ? (
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-soft text-[13px] font-semibold text-primary">
-          {app?.user.initials ?? ""}
-        </span>
-      ) : (
-        <Menu
-          label="Menu pengguna"
-          trigger={
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-soft text-[13px] font-semibold text-primary">
-              {app?.user.initials ?? ""}
-            </span>
-          }
-          items={[{ label: "Setel ulang data demo", onSelect: () => actions.resetDemo() }]}
-        />
-      )}
+      <UserMenu extraItems={isLive ? [] : [{ label: "Setel ulang data demo", onSelect: () => actions.resetDemo() }]} />
     </header>
   );
 }

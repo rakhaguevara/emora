@@ -3,14 +3,12 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field } from "@/components/ui/Field";
 import { RadioCards } from "@/components/ui/RadioCards";
 import { Select } from "@/components/ui/Select";
 import { CUT_SOURCE_LABEL } from "@/lib/constants";
 import { eventJalurLabel } from "@/lib/derive";
 import { fmtNum } from "@/lib/format";
-import { getOperator, setOperator } from "@/lib/operator";
-import { actions, isLive, useApp } from "@/lib/store";
+import { actions, useApp } from "@/lib/store";
 import { ui, useUi } from "@/lib/ui";
 import type { AlertEvent, Cause, Outcome, Timing } from "@/lib/types";
 
@@ -43,7 +41,6 @@ function Form({ ev }: { ev: AlertEvent }) {
   const [timing, setTiming] = useState<Timing | null>(null);
   const [cause, setCause] = useState<Cause>("unknown");
   const [comment, setComment] = useState("");
-  const [name, setName] = useState(getOperator);
   const [touched, setTouched] = useState(false);
   const already = !!ev.feedbackId;
 
@@ -51,8 +48,6 @@ function Form({ ev }: { ev: AlertEvent }) {
     e.preventDefault();
     setTouched(true);
     if (!outcome || !timing) return;
-    if (isLive && !name.trim()) return;
-    if (isLive) setOperator(name);
     actions.submitFeedback(ev.id, { outcome, timing, cause, comment: comment.trim().slice(0, 300) });
     ui.closeFeedback();
   };
@@ -102,16 +97,6 @@ function Form({ ev }: { ev: AlertEvent }) {
         />
         {touched && !timing && <p className="mt-1 text-xs text-danger">Pilih salah satu</p>}
       </div>
-      {isLive && (
-        <Field
-          label="Nama operator"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={60}
-          autoComplete="name"
-          error={touched && !name.trim() ? "Isi nama operator" : null}
-        />
-      )}
       <div>
         <label htmlFor="fb-cause" className="mb-1.5 block text-[13px] font-semibold text-fg">Dugaan penyebab beban berlebih</label>
         <Select id="fb-cause" value={cause} onChange={(e) => setCause(e.target.value as Cause)} className="w-full">

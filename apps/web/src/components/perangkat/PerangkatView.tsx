@@ -2,9 +2,7 @@
 
 import { Check, Clock, MoreHorizontal, Server, Wifi, WifiOff, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader, PageSkeleton } from "@/components/ui/PageHeader";
@@ -12,9 +10,6 @@ import { cn } from "@/lib/cn";
 import { jalurLabel } from "@/lib/derive";
 import { fmtAgo, fmtUptime } from "@/lib/format";
 import { actions, useApp, useLive } from "@/lib/store";
-import type { Jalur } from "@/lib/types";
-import { AddJalurDialog, DeleteDialog, RenameDialog } from "./JalurDialogs";
-import { ManagePanelDialog } from "./ManagePanelDialog";
 
 function rssiLabel(rssi: number): string {
   if (rssi >= -50) return "Sangat baik";
@@ -27,10 +22,6 @@ export function PerangkatView() {
   const app = useApp();
   const live = useLive();
   const router = useRouter();
-  const [adding, setAdding] = useState(false);
-  const [managing, setManaging] = useState(false);
-  const [renaming, setRenaming] = useState<Jalur | null>(null);
-  const [deleting, setDeleting] = useState<Jalur | null>(null);
 
   if (!app || !live) return <PageSkeleton />;
 
@@ -49,15 +40,7 @@ export function PerangkatView() {
 
   return (
     <>
-      <PageHeader
-        title="Perangkat"
-        subtitle="Kesehatan panel, pengontrol ESP32, dan sensor cabang"
-        actions={
-          <Button variant="primary" onClick={() => setAdding(true)}>
-            Tambah jalur
-          </Button>
-        }
-      />
+      <PageHeader title="Perangkat" subtitle="Kesehatan panel, pengontrol ESP32, dan sensor cabang. Data perangkat dikelola admin." />
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-4 p-5">
@@ -75,7 +58,6 @@ export function PerangkatView() {
               </p>
             </div>
           </div>
-          <Button onClick={() => setManaging(true)}>Kelola</Button>
         </div>
         <dl className="grid grid-cols-2 border-t border-line lg:grid-cols-4">
           {stats.map(({ icon: Icon, label, value }, i) => (
@@ -98,7 +80,7 @@ export function PerangkatView() {
         />
         {sorted.length === 0 ? (
           <p className="border-t border-line px-5 py-8 text-center text-[13px] text-fg-3">
-            Belum ada jalur. Gunakan tombol Tambah jalur untuk mendaftarkan sensor.
+            Belum ada jalur. Minta admin mendaftarkan perangkat.
           </p>
         ) : (
           <ul className="border-t border-line">
@@ -142,8 +124,6 @@ export function PerangkatView() {
                     items={[
                       { label: "Lihat detail", onSelect: () => router.push(`/jalur/${j.number}`) },
                       { label: "Uji koneksi", onSelect: () => actions.testConnection(j.id) },
-                      { label: "Ubah nama", onSelect: () => setRenaming(j) },
-                      { label: "Hapus jalur", danger: true, onSelect: () => setDeleting(j) },
                     ]}
                   />
                   </div>
@@ -153,11 +133,6 @@ export function PerangkatView() {
           </ul>
         )}
       </Card>
-
-      <AddJalurDialog open={adding} onClose={() => setAdding(false)} jalur={app.jalur} />
-      <ManagePanelDialog open={managing} onClose={() => setManaging(false)} app={app} />
-      <RenameDialog jalur={renaming} onClose={() => setRenaming(null)} />
-      <DeleteDialog jalur={deleting} onClose={() => setDeleting(null)} />
     </>
   );
 }

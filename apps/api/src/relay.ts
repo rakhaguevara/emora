@@ -1,10 +1,11 @@
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { actorOf, requirePin, requireUser } from './auth/guard.js';
 import { config } from './config.js';
 import { supabase } from './supabase.js';
 
 // Kontrol relai jarak jauh lewat tabel relay_commands.
-// Dashboard  -> POST /api/devices/:id/relay        (x-control-key)  menyimpan perintah 'on'/'off'
+// Dashboard  -> POST /api/devices/:id/relay        (sesi operator + PIN)  menyimpan perintah 'on'/'off'
 // ESP32      -> GET  /api/devices/:id/relay        (x-device-key)   tiap 1 detik, mengambil perintah terakhir
 // ESP32      -> POST /api/devices/:id/relay/ack    (x-device-key)   setelah GPIO relai ditulis
 // Perintah terakhir = keadaan relai yang diinginkan, sehingga ESP32 yang baru menyala ikut keadaan itu.
@@ -21,18 +22,11 @@ export type Role = 'operator' | 'admin' | 'system';
 export interface Actor {
   actor: string;
   role: Role;
+  id?: string; // id akun (app_users) bila pelakunya pengguna yang login
 }
 
 export const SYSTEM: Actor = { actor: 'Sistem', role: 'system' };
 export const ESP32_LOCAL: Actor = { actor: 'ESP32 (proteksi lokal)', role: 'system' };
-
-// Login belum ada: semua tindakan dari dashboard berperan 'operator', nama diambil dari isian dashboard.
-// Saat login ditambahkan, nama dan peran diambil dari token, bukan dari body.
-const actorField = z.string().trim().max(60).optional();
-export function operatorFrom(body: unknown): Actor {
-  const name = actorField.safeParse((body as { actor?: unknown } | null)?.actor);
-  return { actor: (name.success && name.data) || 'Operator', role: 'operator' };
-}
 
 // Perintah terakhir per device. Hanya backend yang menulis relay_commands, jadi cache ini selalu sesuai
 // dan polling ESP32 tiap detik tidak perlu menunggu Supabase.
@@ -68,7 +62,7 @@ export async function createRelayCommand(
     .from('relay_commands')
     .insert({
       device_id: deviceId, action, source, recommendation_id: opts.recommendationId ?? null,
-      actor: opts.by.actor, actor_role: opts.by.role, reason: opts.reason ?? null, mode: opts.mode,
+      actor: opts.by.actor, actor_role: opts.by.role, actor_id: opts.by.id ?? null, reason: opts.reason ?? null, mode: opts.mode,
     })
     .select('id,ts,action,status').single();
   if (error) throw error;
@@ -93,26 +87,17 @@ export function setRelayPolicy(p: RelayPolicy) {
   policy = p;
 }
 
-export function controlAuth(req: FastifyRequest, reply: FastifyReply): boolean {
-  if (!config.controlApiKey) {
-    void reply.code(503).send({ error: 'control_disabled', message: 'CONTROL_API_KEY belum diisi di apps/api/.env' });
-    return false;
-  }
-  if (req.headers['x-control-key'] === config.controlApiKey) return true;
-  void reply.code(401).send({ error: 'unauthorized' });
-  return false;
-}
-
 function deviceAuth(req: FastifyRequest, reply: FastifyReply): boolean {
   if (req.headers['x-device-key'] === config.ingestApiKey) return true;
   void reply.code(401).send({ error: 'unauthorized' });
   return false;
 }
 
-// Alasan wajib untuk perintah dari pengguna
+// Alasan wajib untuk perintah dari operator; PIN diperiksa terpisah (requirePin)
 const commandBody = z.object({
   action: z.enum(['on', 'off']),
   reason: z.string().trim().min(1, 'Alasan wajib diisi').max(300),
+  pin: z.unknown(),
 });
 const ackBody = z.object({ command_id: z.number().int(), relay_on: z.boolean() });
 
@@ -120,11 +105,13 @@ type Params = { Params: { id: string } };
 
 export function registerRelayRoutes(app: FastifyInstance) {
   app.post<Params>('/api/devices/:id/relay', async (req, reply) => {
-    if (!controlAuth(req, reply)) return;
+    const user = await requireUser(req, reply, 'operator');
+    if (!user) return;
     const parsed = commandBody.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', message: parsed.error.issues[0]?.message, issues: parsed.error.issues });
     }
+    if (!(await requirePin(user, parsed.data.pin, reply))) return;
 
     const deviceId = req.params.id;
     const { data: dev, error: devErr } = await supabase.from('devices').select('id').eq('id', deviceId).maybeSingle();
@@ -139,7 +126,7 @@ export function registerRelayRoutes(app: FastifyInstance) {
         return reply.code(409).send({ error: 'anomaly_active', message: blocked });
       }
     }
-    const by = operatorFrom(req.body);
+    const by = actorOf(user);
     const data = await createRelayCommand(deviceId, parsed.data.action, 'user', {
       by, mode: await policy.mode(deviceId), reason: parsed.data.reason,
     });

@@ -13,14 +13,15 @@ flash ESP32, sampai memastikan data masuk. Ikuti berurutan.
 | Dashboard (`apps/web`) | **Mode live** bila `apps/web/.env.local` berisi kunci Supabase: menampilkan 1 jalur (`emora-01`) dari tabel `readings`, `alerts`, `devices` (24 jam terakhir, diperbarui tiap 5 detik). Tanpa kunci: **mode demo** (data simulasi). Penanda LIVE/DEMO ada di kanan atas. |
 | Backend (`apps/api`) | Menerima data ESP32 lewat `POST /ingest`, menyimpan ke Supabase, membuat alert. Logikanya diuji dengan Supabase **tiruan**, belum dengan Supabase asli. |
 | Firmware (`EMORA_FINAL`) | Satu file `.ino`: baca sensor, alarm lokal, kirim data lewat WiFi. **Belum pernah dikompilasi dengan toolchain ESP32 atau dijalankan di ESP32.** Sintaksnya dicek di komputer dengan stub dan pembuat JSON-nya diuji. |
-| Kontrol relai dari dashboard | Tombol relai di dashboard → backend (`relay_commands`) → ESP32 mengambil perintah tiap 1 detik → GPIO26 → konfirmasi tampil di dashboard. Perintah terakhir diingat: ESP32 yang baru menyala ikut keadaan itu. Butuh `CONTROL_API_KEY` (backend) = `NEXT_PUBLIC_EMORA_CONTROL_KEY` (dashboard). |
-| Jejak audit | Setiap ON/OFF dari dashboard **wajib nama operator dan alasan**; tersimpan di `relay_commands` (`actor`, `actor_role`, `reason`, `mode`). Keputusan pop-up anomali tercatat di `recommendations.decided_by`, ganti mode di `mode_changes`. Semua tampil di halaman Peringatan. Login belum ada: semua tindakan berperan `operator`, nama diingat per browser. Peran admin (mis. hanya admin yang boleh ganti mode) menyusul bersama login. |
+| Kontrol relai dari dashboard | Tombol relai di dashboard → backend (`relay_commands`) → ESP32 mengambil perintah tiap 1 detik → GPIO26 → konfirmasi tampil di dashboard. Perintah terakhir diingat: ESP32 yang baru menyala ikut keadaan itu. Hanya **operator yang login**, dan setiap ON/OFF (termasuk "Putus sekarang" / "Biarkan menyala" pada pop-up anomali) **wajib PIN kontrol 6 digit milik operator itu**. PIN salah 5 kali: kontrol akun itu dikunci 5 menit. |
+| Login & peran | Login username + password di `/login` (tanpa Google). **Tidak ada pendaftaran mandiri: akun hanya dibuat admin.** Dua halaman terpisah: **Operator** (`/`, Peringatan, Energi, Perangkat, Detail Jalur) untuk memantau, kontrol relai, respons anomali, dan feedback; **Admin** (`/admin`) untuk kelola akun (buat, nonaktifkan, reset password, buat PIN baru), data perangkat (nama, lokasi, mode respons, ambang batas), tarif, dan melihat aktivitas. Admin tidak mengontrol relai; operator tidak mengubah data. Backend memeriksa sesi dan peran di setiap permintaan. Sesi berlaku 12 jam; login salah 5 kali mengunci username itu 5 menit. |
+| Jejak audit | Setiap ON/OFF wajib alasan; pelaku diambil dari akun yang login (`relay_commands.actor`, `actor_id`). Keputusan pop-up anomali tercatat di `recommendations.decided_by`, ganti mode (oleh admin) di `mode_changes`. Tampil di halaman Peringatan (operator) dan Admin → Aktivitas. |
 | Feedback | Setelah relai diputus (otomatis, pengaman, operator, atau proteksi ESP32), dashboard meminta feedback: dampak, ketepatan waktu, dugaan penyebab. Disimpan lewat `POST /api/devices/:id/feedback` ke tabel `feedback` (satu per pemutusan). Pemutusan yang belum diberi feedback punya tombol **Feedback** di halaman Peringatan. |
 | Proteksi lokal ESP32 | ESP32 memutus relai sendiri tanpa menunggu backend bila (a) arus > 3 A, daya > 75 W, atau tegangan di luar 170–255 V selama 2 pembacaan, atau (b) backend tak terjangkau dan anomali (selain suhu) berlangsung 30 detik. Relai lalu terkunci: perintah ON ditolak ESP32 selama nilai masih kritis. Batas ada di konstanta `HARD_*` firmware (tidak ikut `devices.thresholds`). Kejadian dilaporkan lewat telemetri dan tampil sebagai trip "Proteksi ESP32". |
 | Notifikasi | Data baru lewat **Supabase Realtime (WebSocket)**, polling tiap 5 detik sebagai cadangan (penanda kanan atas: `LIVE` = WebSocket, `LIVE · polling` = cadangan). Pop-up saat ada alert, ESP32 offline (>20 detik tanpa data), PZEM atau DHT22 tidak terbaca. Notifikasi sistem (ikon lonceng) hanya di `localhost`/HTTPS, tidak saat dibuka dari HP lewat IP. |
 | Respons anomali | Anomali = nilai di luar ambang batas (tabel `devices.thresholds`: tegangan, arus, daya, suhu, frekuensi, PF, energi per jam). Backend membuat rekomendasi putus relai (`recommendations`) dan dashboard menampilkan pop-up hitung mundur + getar HP. Mode **Otomatis**: relai diputus 10 detik kemudian kecuali dibatalkan. Mode **Semi-otomatis**: 30 detik untuk memutuskan, lalu pengaman memutus. Di mode Otomatis relai tidak bisa dinyalakan selama anomali (selain suhu) masih aktif; di Semi-otomatis boleh, tetapi hitung mundur baru dimulai. Pindah ke Otomatis saat anomali aktif juga memulai hitung mundur. Berjalan di backend, jadi tetap bekerja tanpa dashboard terbuka (tetapi tidak saat backend mati). Pembacaan PZEM yang mustahil (mis. 300 Hz) diabaikan. Mode diubah di Detail Jalur. **Suhu (DHT22) hanya peringatan**: alert overheat tercatat dan dinotifikasi, tetapi tidak memicu pemutusan relai. |
 | Suhu & kelembapan | Ditampilkan di Ringkasan (kartu jalur) dan Detail Jalur (kartu + grafik riwayat), tetap terbaca walau PZEM gagal. |
-| Dashboard ↔ Supabase | Dashboard hanya membaca Supabase. Penulisan (relai, mode, feedback) lewat backend. Ubah ambang dan tambah jalur belum tersedia di mode live. |
+| Dashboard ↔ Supabase | Dashboard hanya membaca Supabase. Penulisan (relai, mode, ambang, feedback, akun) lewat backend. |
 
 Artinya, setelah semua langkah di bawah selesai, **data dari ESP32 sampai ke tabel Supabase dan tampil di dashboard** (mode live).
 Dashboard tetap bisa dicoba dengan data simulasi (langkah 2) dengan mengosongkan kunci di `apps/web/.env.local`.
@@ -74,7 +75,9 @@ Kalau muncul error `Invalid Version`, hapus `node_modules` dan `package-lock.jso
 npm run dev:web        # buka http://localhost:3000
 ```
 
-Semua halaman dan aksi (relai, ambang, feedback, simulasi beban berlebih) bekerja pada data simulasi di browser.
+Tanpa kunci Supabase, halaman `/login` menawarkan **Masuk demo sebagai Operator/Admin** (tanpa password).
+Halaman operator (relai, feedback, simulasi beban berlebih) bekerja pada data simulasi di browser; PIN demo `123456`.
+Panel admin butuh mode live (akun dan data perangkat tersimpan di backend).
 Menu avatar (kanan atas) → "Setel ulang data demo" mengembalikan keadaan awal. Hentikan dengan `Ctrl+C`.
 
 ## 3. Siapkan Supabase
@@ -83,7 +86,9 @@ Menu avatar (kanan atas) → "Setel ulang data demo" mengembalikan keadaan awal.
 2. Buka **SQL Editor** → **New query**, tempel seluruh isi
    [supabase/migrations/20261014000000_init.sql](supabase/migrations/20261014000000_init.sql), lalu klik **Run**.
    Lalu ulangi dengan [supabase/migrations/20261017000000_audit_feedback.sql](supabase/migrations/20261017000000_audit_feedback.sql)
-   (jejak audit, riwayat mode, feedback). Database yang sudah berjalan cukup menjalankan file kedua ini.
+   (jejak audit, riwayat mode, feedback), lalu [supabase/migrations/20261018000000_auth.sql](supabase/migrations/20261018000000_auth.sql)
+   (akun, sesi login, PIN), lalu [supabase/migrations/20261018010000_energy_admin.sql](supabase/migrations/20261018010000_energy_admin.sql)
+   (tarif, rekomendasi harian). Database yang sudah berjalan cukup menjalankan file yang belum pernah dijalankan, berurutan.
    Harus tampil "Success".
 3. Buka **Table Editor**. Tabel `devices` harus berisi satu baris `emora-01`. Kalau tabelnya tidak ada, migration gagal dijalankan.
 4. Buka **Project Settings → API**, catat:
@@ -123,7 +128,19 @@ dengan `DEVICE_KEY` di firmware. Lalu jalankan:
 npm run dev:api        # http://localhost:4000
 ```
 
-Biarkan terminal ini tetap terbuka selama ESP32 dipakai. Uji tanpa ESP32:
+Biarkan terminal ini tetap terbuka selama ESP32 dipakai.
+
+**Buat akun admin pertama** (sekali saja; akun berikutnya dibuat dari halaman Admin) di terminal lain:
+
+```bash
+npm run create-admin -w apps/api -- admin "Nama Admin"     # lalu isi password (min. 8 karakter)
+```
+
+Masuk di `http://localhost:3000/login` dengan akun itu → **Admin → Akun → Tambah akun** untuk membuat operator.
+PIN kontrol operator (6 digit) muncul **sekali** setelah akun dibuat; berikan langsung ke operatornya.
+Lupa PIN: Admin → Akun → menu ⋯ → **Buat PIN baru**.
+
+Uji tanpa ESP32:
 
 ```bash
 curl http://localhost:4000/health        # -> {"ok":true}
@@ -252,9 +269,9 @@ Kalau kelima langkah berhasil, rantai ESP32 → backend → Supabase sudah aktif
    tabel sekarang satu perangkat per pembacaan. Perlu tabel `channels` dan kolom `channel_id` di `readings`.
    Firmware pun perlu membaca beberapa PZEM bila memang banyak jalur.
 2. **Penulisan dari dashboard**: mode live (`apps/web/src/lib/live/sync.ts`) baru membaca. Ubah ambang, akui alert ke database, dan feedback perlu endpoint backend. Riwayat grafik hanya 24 jam terakhir.
-3. **Pemutusan otomatis dan login**: kontrol manual sudah ada, tetapi mode otomatis/manual, feedback ke ML, dan login belum.
-   Kunci kontrol saat ini terlihat di browser, jadi siapa pun di jaringan yang sama bisa mengontrol relai.
+3. **Feedback ke ML**: feedback sudah tersimpan, tetapi belum dipakai melatih ulang model.
+   Data pemantauan (tabel `readings`, `alerts`, dst.) masih bisa dibaca dengan kunci publishable tanpa login (RLS `anon`); kontrol dan penulisan sudah wajib login.
 4. **Riwayat kegagalan sensor** baru dicatat per sesi browser (ESP32 offline / PZEM / DHT22 tidak terbaca diturunkan dari
    tabel `readings`). Untuk riwayat permanen perlu jenis alert baru di tabel `alerts` (migrasi skema).
-5. **Login** sebelum kontrol relai diaktifkan.
+5. Operator belum bisa mengganti password/PIN sendiri (direset oleh admin). Batas percobaan login/PIN disimpan di memori backend (reset saat backend dijalankan ulang).
 6. Uji firmware pada hardware sungguhan, lalu perbaiki bila perlu.

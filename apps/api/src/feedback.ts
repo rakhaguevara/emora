@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { controlAuth, operatorFrom } from './relay.js';
+import { actorOf, requireUser } from './auth/guard.js';
 import { supabase } from './supabase.js';
 
 // Feedback pengguna atas sebuah pemutusan relai; bahan evaluasi respons sistem dan pelatihan ML.
-// Dashboard -> POST /api/devices/:id/feedback (x-control-key)
+// Dashboard -> POST /api/devices/:id/feedback (sesi operator)
 // Target: rekomendasi yang sudah dieksekusi (recommendation_id), atau perintah OFF tanpa rekomendasi
 // seperti proteksi lokal ESP32 atau OFF manual (command_id). Satu feedback per pemutusan.
 
@@ -31,7 +31,8 @@ function cutSourceOf(cmd: CommandRow): CutSource {
 
 export function registerFeedbackRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/devices/:id/feedback', async (req, reply) => {
-    if (!controlAuth(req, reply)) return;
+    const user = await requireUser(req, reply, 'operator');
+    if (!user) return;
     const parsed = body.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', message: parsed.error.issues[0]?.message, issues: parsed.error.issues });
@@ -46,14 +47,14 @@ export function registerFeedbackRoutes(app: FastifyInstance) {
     const cmd = cmds?.[0] as CommandRow | undefined;
     if (!cmd) return reply.code(404).send({ error: 'not_found', message: 'Pemutusan relai tidak ditemukan' });
 
-    const by = operatorFrom(req.body);
+    const by = actorOf(user);
     const { data, error: e } = await supabase.from('feedback').insert({
       device_id: deviceId,
       recommendation_id: b.recommendation_id ?? null,
       command_id: cmd.id, // selalu diisi, sehingga indeks unik command_id mencegah feedback ganda lewat jalur mana pun
       cut_source: cutSourceOf(cmd),
       outcome: b.outcome, timing: b.timing, cause: b.cause, comment: b.comment || null,
-      actor: by.actor, actor_role: by.role,
+      actor: by.actor, actor_role: by.role, actor_id: by.id,
     }).select('id').single();
     if (e?.code === '23505') return reply.code(409).send({ error: 'duplicate', message: 'Feedback untuk pemutusan ini sudah tercatat' });
     if (e) throw e;
