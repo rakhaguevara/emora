@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader, PageSkeleton } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { cn } from "@/lib/cn";
@@ -10,7 +11,8 @@ import { CUT_SOURCE_LABEL, EVENT_TYPE_LABEL } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv";
 import { eventJalurLabel, eventReviewHref, eventValueText } from "@/lib/derive";
 import { fmtDuration, fmtEventTime, fmtNum, fmtDateTimeLong } from "@/lib/format";
-import { actions, useApp, useLive } from "@/lib/store";
+import { actions, isLive, useApp, useLive } from "@/lib/store";
+import { ui } from "@/lib/ui";
 import type { AlertEvent, EventType } from "@/lib/types";
 
 const RANGES = [
@@ -34,6 +36,7 @@ export function PeringatanView() {
   const [jalur, setJalur] = useState("all");
   const [type, setType] = useState("all");
   const [range, setRange] = useState("7");
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const now = live?.now ?? 0;
   const rows = useMemo(() => {
@@ -74,9 +77,41 @@ export function PeringatanView() {
         title="Peringatan & Kejadian"
         subtitle="Riwayat perubahan status dan tindakan pada semua jalur"
         actions={
-          <Button onClick={exportCsv} disabled={rows.length === 0}>
-            Ekspor CSV
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => setConfirmClear(true)} disabled={app.events.length === 0}>
+              Bersihkan notifikasi
+            </Button>
+            <Button onClick={exportCsv} disabled={rows.length === 0}>
+              Ekspor CSV
+            </Button>
+          </div>
+        }
+      />
+
+      <Dialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        title="Bersihkan notifikasi?"
+        description={
+          isLive
+            ? `${app.events.length} kejadian akan disembunyikan dari dashboard di browser ini. Data di Supabase tidak dihapus. Kejadian baru tetap muncul.`
+            : `${app.events.length} kejadian akan dihapus dari data demo. Kejadian baru tetap muncul.`
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmClear(false)}>
+              Batal
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                actions.clearEvents();
+                setConfirmClear(false);
+              }}
+            >
+              Bersihkan
+            </Button>
+          </>
         }
       />
 
@@ -156,6 +191,11 @@ export function PeringatanView() {
                     <span>{e.handledBy ?? "—"}</span>
                   )}
                 </div>
+                {needsFeedback(e) && (
+                  <Button size="sm" className="mt-3 w-full" onClick={() => ui.openFeedback(e.id)}>
+                    Beri feedback
+                  </Button>
+                )}
                 {review && (
                   <ButtonLink href={review} size="sm" className="mt-3 w-full">
                     Tinjau {e.type === "trip" || e.type === "warning" ? "masalah" : "jalur"}
@@ -222,7 +262,12 @@ export function PeringatanView() {
                         (e.handledBy ?? "—")
                       )}
                     </td>
-                    <td className="px-4 py-3.5 whitespace-nowrap">
+                    <td className="space-x-2 px-4 py-3.5 whitespace-nowrap">
+                      {needsFeedback(e) && (
+                        <Button size="sm" onClick={() => ui.openFeedback(e.id)}>
+                          Feedback
+                        </Button>
+                      )}
                       {review ? (
                         <ButtonLink href={review} size="sm" aria-label={`Tinjau ${EVENT_TYPE_LABEL[e.type].toLowerCase()} ${eventJalurLabel(app, e)}`}>
                           Tinjau
@@ -241,3 +286,6 @@ export function PeringatanView() {
     </>
   );
 }
+
+// Pemutusan relai yang belum diberi feedback
+const needsFeedback = (e: AlertEvent) => e.type === "trip" && !!e.cutSource && !e.feedbackId;

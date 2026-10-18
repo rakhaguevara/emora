@@ -10,7 +10,7 @@ import { fmtDateTimeLong, fmtNum, parseLocaleNumber } from "@/lib/format";
 import { actions } from "@/lib/store";
 import type { Jalur, Thresholds } from "@/lib/types";
 
-type Key = keyof Thresholds;
+type Key = Exclude<keyof Thresholds, "tempMax">; // ambang suhu hanya dari Supabase (peringatan)
 
 const FIELDS: { key: Key; label: string; unit: string; digits: number; hint: string }[] = [
   { key: "voltMin", label: "Tegangan minimum", unit: "V", digits: 0, hint: `Bawaan ${fmtNum(FACTORY_THRESHOLDS.voltMin, 0)} V` },

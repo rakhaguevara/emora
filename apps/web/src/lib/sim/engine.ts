@@ -1,3 +1,4 @@
+import { getHistory, integrateKwh, lowerBound, nearest } from "../live/history";
 import type { AppState, Interval, Jalur, Param, Sample } from "../types";
 
 // Data simulasi deterministik: nilai pada waktu t selalu sama untuk jalur yang sama,
@@ -95,6 +96,12 @@ export function isOff(intervals: Interval[] | undefined, t: number): boolean {
 const r = (x: number, d: number) => Math.round(x * 10 ** d) / 10 ** d;
 
 export function sampleAt(w: World, j: Jalur, t: number, withEnergy = false): Sample | null {
+  const hist = getHistory(j.sensorId);
+  if (hist) {
+    const s = nearest(hist, t);
+    if (!s) return null;
+    return { ...s, energyKwh: withEnergy ? integrateKwh(hist, startOfDay(t), t) : 0 };
+  }
   if (j.offlineSince != null && t >= j.offlineSince) return null;
   const seed = j.number * 7919;
   const p = profileFor(j.number);
@@ -139,6 +146,8 @@ export function sampleAt(w: World, j: Jalur, t: number, withEnergy = false): Sam
 }
 
 export function energyKwhBetween(w: World, j: Jalur, from: number, to: number): number {
+  const hist = getHistory(j.sensorId);
+  if (hist) return integrateKwh(hist, from, to);
   const step = 15 * 60e3;
   let wh = 0;
   for (let t0 = from; t0 < to; t0 += step) {
@@ -156,6 +165,24 @@ export interface Point {
 
 // Deret waktu untuk grafik. Langkah >= 1 jam dirata-ratakan dari beberapa sub-sampel.
 export function series(w: World, j: Jalur, param: Param, from: number, to: number, stepMs: number): Point[] {
+  const hist = getHistory(j.sensorId);
+  if (hist) {
+    // Data asli: rata-rata semua sampel di sekitar titik; bila kosong, pakai sampel terdekat.
+    const out: Point[] = [];
+    for (let ts = from; ts <= to; ts += stepMs) {
+      let sum = 0;
+      let n = 0;
+      for (let i = lowerBound(hist, ts - stepMs / 2); i < hist.length && hist[i].ts < ts + stepMs / 2; i++) {
+        const v = hist[i][param];
+        if (v != null) {
+          sum += v;
+          n++;
+        }
+      }
+      out.push({ ts, value: n ? sum / n : (nearest(hist, ts)?.[param] ?? null) });
+    }
+    return out;
+  }
   const subs = stepMs >= 3600e3 ? 4 : 1;
   const out: Point[] = [];
   for (let ts = from; ts <= to; ts += stepMs) {
@@ -184,6 +211,16 @@ export function rangeStats(
 ): { min: number; max: number } | null {
   let min = Infinity;
   let max = -Infinity;
+  const hist = getHistory(j.sensorId);
+  if (hist) {
+    for (let i = lowerBound(hist, now - 24 * 3600e3); i < hist.length && hist[i].ts <= now; i++) {
+      const v = hist[i][param];
+      if (v == null) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    return Number.isFinite(min) ? { min, max } : null;
+  }
   if (extra && extra.ts >= now - 24 * 3600e3 && extra[param] != null) {
     min = max = extra[param] as number;
   }

@@ -4,6 +4,36 @@ export function fmtNum(n: number, digits = 1): string {
   return n.toLocaleString("id-ID", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+// Desimal adaptif: beban kecil (lampu, charger) tetap terbaca, nilai besar tetap ringkas.
+// base = jumlah desimal minimum untuk nilai >= 10.
+export function smartDigits(n: number, base: number): number {
+  const a = Math.abs(n);
+  if (a === 0 || !Number.isFinite(a)) return base;
+  if (a < 0.1) return Math.max(base, 3);
+  if (a < 1) return Math.max(base, 2);
+  if (a < 10) return Math.max(base, 1);
+  return base;
+}
+
+export const fmtSmart = (n: number, base = 0) => fmtNum(n, smartDigits(n, base));
+
+// Energi di bawah 1 kWh ditampilkan dalam Wh agar tidak terbaca 0,0 kWh.
+export function fmtEnergy(kwh: number): { value: string; unit: "Wh" | "kWh" } {
+  if (Math.abs(kwh) < 1) return { value: fmtSmart(kwh * 1000, 0), unit: "Wh" };
+  return { value: fmtNum(kwh, kwh < 10 ? 2 : 1), unit: "kWh" };
+}
+
+export const fmtEnergyText = (kwh: number) => {
+  const e = fmtEnergy(kwh);
+  return `${e.value} ${e.unit}`;
+};
+
+// Desimal label sumbu dari jarak antar tick (0,01 -> 2 desimal)
+export function tickDigits(ticks: number[]): number {
+  const step = ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1;
+  return step > 0 && step < 1 ? Math.min(4, Math.ceil(-Math.log10(step) - 1e-9)) : 0;
+}
+
 export function fmtRp(n: number): string {
   return "Rp " + Math.round(n).toLocaleString("id-ID");
 }

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Switch } from "@/components/ui/Switch";
 import { cn } from "@/lib/cn";
 import { jalurLabel, STATUS_LABEL } from "@/lib/derive";
-import { fmtNum } from "@/lib/format";
+import { fmtNum, fmtSmart } from "@/lib/format";
 import type { Jalur, JalurStatus, Sample } from "@/lib/types";
 
 const TONE: Record<JalurStatus, "success" | "warning" | "danger" | "neutral"> = {
@@ -12,19 +12,21 @@ const TONE: Record<JalurStatus, "success" | "warning" | "danger" | "neutral"> = 
 };
 
 export function JalurCard({
-  jalur, sample, status, onRelay,
+  jalur, sample, status, onRelay, temperature,
 }: {
   jalur: Jalur;
   sample: Sample | null;
+  temperature?: number | null; // suhu panel (mode live); undefined = tidak ditampilkan
   status: JalurStatus;
   onRelay: (next: boolean) => void;
 }) {
   const on = jalur.relayOn && !!sample;
   const metrics: [string, string][] = [
     ["Tegangan", sample ? `${fmtNum(sample.voltage, 0)} V` : "—"],
-    ["Arus", on ? `${fmtNum(sample!.current, 1)} A` : "—"],
-    ["Daya", on ? `${fmtNum(sample!.power, 0)} W` : "—"],
+    ["Arus", on ? `${fmtSmart(sample!.current, 1)} A` : "—"],
+    ["Daya", on ? `${fmtSmart(sample!.power, 0)} W` : "—"],
     ["PF", on && sample!.pf != null ? fmtNum(sample!.pf, 2) : "—"],
+    ...(temperature !== undefined ? ([["Suhu", temperature != null ? `${fmtNum(temperature, 1)} °C` : "—"]] as [string, string][]) : []),
   ];
   return (
     <article
@@ -53,7 +55,7 @@ export function JalurCard({
           Detail
         </Link>
       </div>
-      <dl className="mt-4 grid grid-cols-4 gap-2 border-t border-line pt-3 text-xs tabular-nums">
+      <dl className={cn("mt-4 grid gap-2 border-t border-line pt-3 text-xs tabular-nums", metrics.length > 4 ? "grid-cols-5" : "grid-cols-4")}>
         {metrics.map(([k, v]) => (
           <div key={k}>
             <dt className="text-fg-3">{k}</dt>

@@ -1,8 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { config } from './config.js';
-import { ingest, UnknownDeviceError } from './ingest.js';
+import { startAutomation } from './automation.js';
+import { registerFeedbackRoutes } from './feedback.js';
+import { ingest, setIngestLogger, UnknownDeviceError } from './ingest.js';
 import { startMqtt } from './mqtt.js';
+import { registerRelayRoutes } from './relay.js';
 import { telemetrySchema } from './schema.js';
 import { supabase } from './supabase.js';
 
@@ -19,7 +22,7 @@ app.post('/ingest', async (req, reply) => {
   const parsed = telemetrySchema.safeParse(req.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload', issues: parsed.error.issues });
   try {
-    await ingest(parsed.data);
+    await ingest(parsed.data, (err) => req.log.error({ err }, 'Gagal menyimpan ke Supabase'));
     return reply.code(202).send({ ok: true });
   } catch (err) {
     if (err instanceof UnknownDeviceError) return reply.code(404).send({ error: 'unknown_device' });
@@ -52,5 +55,9 @@ app.get<{ Params: { id: string }; Querystring: { minutes?: string; limit?: strin
   },
 );
 
+registerRelayRoutes(app);
+registerFeedbackRoutes(app);
+setIngestLogger(app.log);
+await startAutomation(app);
 startMqtt(app.log);
 await app.listen({ port: config.port, host: '0.0.0.0' });

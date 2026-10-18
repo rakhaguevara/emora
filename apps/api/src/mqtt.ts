@@ -25,7 +25,7 @@ export function startMqtt(log: FastifyBaseLogger) {
     try {
       const parsed = telemetrySchema.safeParse(JSON.parse(payload.toString()));
       if (!parsed.success) return log.warn({ issues: parsed.error.issues }, 'Payload MQTT tidak valid');
-      await ingest(parsed.data);
+      await ingest(parsed.data, (err) => log.error({ err }, 'Gagal menyimpan pesan MQTT'));
     } catch (err) {
       log.error({ err }, 'Gagal memproses pesan MQTT');
     }

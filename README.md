@@ -10,20 +10,26 @@ flash ESP32, sampai memastikan data masuk. Ikuti berurutan.
 
 | Bagian | Status |
 |---|---|
-| Dashboard (`apps/web`) | UI lengkap dan responsive, tetapi **datanya simulasi di browser**. Belum membaca data dari ESP32 atau Supabase. |
+| Dashboard (`apps/web`) | **Mode live** bila `apps/web/.env.local` berisi kunci Supabase: menampilkan 1 jalur (`emora-01`) dari tabel `readings`, `alerts`, `devices` (24 jam terakhir, diperbarui tiap 5 detik). Tanpa kunci: **mode demo** (data simulasi). Penanda LIVE/DEMO ada di kanan atas. |
 | Backend (`apps/api`) | Menerima data ESP32 lewat `POST /ingest`, menyimpan ke Supabase, membuat alert. Logikanya diuji dengan Supabase **tiruan**, belum dengan Supabase asli. |
-| Firmware (`firmware/EMORA_FINAL`) | Satu file `.ino`: baca sensor, alarm lokal, kirim data lewat WiFi. **Belum pernah dikompilasi dengan toolchain ESP32 atau dijalankan di ESP32.** Sintaksnya dicek di komputer dengan stub dan pembuat JSON-nya diuji. |
-| Kontrol relai dari dashboard | **Belum ada.** Relai selalu ON, tidak ada pemutusan otomatis dan tidak ada perintah dari dashboard. |
-| Dashboard ↔ Supabase | **Belum tersambung.** Dashboard memakai model "banyak jalur" yang belum ada di skema database. |
+| Firmware (`EMORA_FINAL`) | Satu file `.ino`: baca sensor, alarm lokal, kirim data lewat WiFi. **Belum pernah dikompilasi dengan toolchain ESP32 atau dijalankan di ESP32.** Sintaksnya dicek di komputer dengan stub dan pembuat JSON-nya diuji. |
+| Kontrol relai dari dashboard | Tombol relai di dashboard → backend (`relay_commands`) → ESP32 mengambil perintah tiap 1 detik → GPIO26 → konfirmasi tampil di dashboard. Perintah terakhir diingat: ESP32 yang baru menyala ikut keadaan itu. Butuh `CONTROL_API_KEY` (backend) = `NEXT_PUBLIC_EMORA_CONTROL_KEY` (dashboard). |
+| Jejak audit | Setiap ON/OFF dari dashboard **wajib nama operator dan alasan**; tersimpan di `relay_commands` (`actor`, `actor_role`, `reason`, `mode`). Keputusan pop-up anomali tercatat di `recommendations.decided_by`, ganti mode di `mode_changes`. Semua tampil di halaman Peringatan. Login belum ada: semua tindakan berperan `operator`, nama diingat per browser. Peran admin (mis. hanya admin yang boleh ganti mode) menyusul bersama login. |
+| Feedback | Setelah relai diputus (otomatis, pengaman, operator, atau proteksi ESP32), dashboard meminta feedback: dampak, ketepatan waktu, dugaan penyebab. Disimpan lewat `POST /api/devices/:id/feedback` ke tabel `feedback` (satu per pemutusan). Pemutusan yang belum diberi feedback punya tombol **Feedback** di halaman Peringatan. |
+| Proteksi lokal ESP32 | ESP32 memutus relai sendiri tanpa menunggu backend bila (a) arus > 3 A, daya > 75 W, atau tegangan di luar 170–255 V selama 2 pembacaan, atau (b) backend tak terjangkau dan anomali (selain suhu) berlangsung 30 detik. Relai lalu terkunci: perintah ON ditolak ESP32 selama nilai masih kritis. Batas ada di konstanta `HARD_*` firmware (tidak ikut `devices.thresholds`). Kejadian dilaporkan lewat telemetri dan tampil sebagai trip "Proteksi ESP32". |
+| Notifikasi | Data baru lewat **Supabase Realtime (WebSocket)**, polling tiap 5 detik sebagai cadangan (penanda kanan atas: `LIVE` = WebSocket, `LIVE · polling` = cadangan). Pop-up saat ada alert, ESP32 offline (>20 detik tanpa data), PZEM atau DHT22 tidak terbaca. Notifikasi sistem (ikon lonceng) hanya di `localhost`/HTTPS, tidak saat dibuka dari HP lewat IP. |
+| Respons anomali | Anomali = nilai di luar ambang batas (tabel `devices.thresholds`: tegangan, arus, daya, suhu, frekuensi, PF, energi per jam). Backend membuat rekomendasi putus relai (`recommendations`) dan dashboard menampilkan pop-up hitung mundur + getar HP. Mode **Otomatis**: relai diputus 10 detik kemudian kecuali dibatalkan. Mode **Semi-otomatis**: 30 detik untuk memutuskan, lalu pengaman memutus. Di mode Otomatis relai tidak bisa dinyalakan selama anomali (selain suhu) masih aktif; di Semi-otomatis boleh, tetapi hitung mundur baru dimulai. Pindah ke Otomatis saat anomali aktif juga memulai hitung mundur. Berjalan di backend, jadi tetap bekerja tanpa dashboard terbuka (tetapi tidak saat backend mati). Pembacaan PZEM yang mustahil (mis. 300 Hz) diabaikan. Mode diubah di Detail Jalur. **Suhu (DHT22) hanya peringatan**: alert overheat tercatat dan dinotifikasi, tetapi tidak memicu pemutusan relai. |
+| Suhu & kelembapan | Ditampilkan di Ringkasan (kartu jalur) dan Detail Jalur (kartu + grafik riwayat), tetap terbaca walau PZEM gagal. |
+| Dashboard ↔ Supabase | Dashboard hanya membaca Supabase. Penulisan (relai, mode, feedback) lewat backend. Ubah ambang dan tambah jalur belum tersedia di mode live. |
 
-Artinya, setelah semua langkah di bawah selesai, **data dari ESP32 sampai ke tabel Supabase** (kamu lihat di Table Editor),
-tetapi **belum tampil di dashboard**. Dashboard tetap bisa dicoba dengan data simulasi (langkah 2).
+Artinya, setelah semua langkah di bawah selesai, **data dari ESP32 sampai ke tabel Supabase dan tampil di dashboard** (mode live).
+Dashboard tetap bisa dicoba dengan data simulasi (langkah 2) dengan mengosongkan kunci di `apps/web/.env.local`.
 
 ## Isi repositori
 
 | Folder | Isi |
 |---|---|
-| `firmware/EMORA_FINAL/` | **Firmware final satu file (`EMORA_FINAL.ino`). Ini yang di-flash ke ESP32.** |
+| `EMORA_FINAL/` | **Firmware final satu file (`EMORA_FINAL.ino`). Ini yang di-flash ke ESP32.** |
 | `firmware/EMORA_IoT/` | Versi lama yang sama isinya tetapi terpecah jadi 3 file. Tidak perlu dipakai. |
 | `PZEM004Tv30 2/` | Firmware asli (`EMORA.ino`): hanya Serial Monitor, tanpa WiFi. Tidak diubah. |
 | `apps/api/` | Backend Fastify + TypeScript |
@@ -34,9 +40,9 @@ tetapi **belum tampil di dashboard**. Dashboard tetap bisa dicoba dengan data si
 
 ```
 PZEM-004T + DHT22 → ESP32 ──WiFi/HTTP POST──▶ Backend (apps/api) ──▶ Supabase (tabel readings, alerts)
-                                                                              │ (belum tersambung)
+                                                                              │ (REST, kunci publishable, tiap 5 dtk)
                                                                               ▼
-                                                                   Dashboard (apps/web, data simulasi)
+                                                                   Dashboard (apps/web, mode live)
 ```
 
 ## Yang perlu disiapkan
@@ -76,6 +82,8 @@ Menu avatar (kanan atas) → "Setel ulang data demo" mengembalikan keadaan awal.
 1. Buat project baru di [supabase.com](https://supabase.com). Tunggu sampai selesai disiapkan.
 2. Buka **SQL Editor** → **New query**, tempel seluruh isi
    [supabase/migrations/20261014000000_init.sql](supabase/migrations/20261014000000_init.sql), lalu klik **Run**.
+   Lalu ulangi dengan [supabase/migrations/20261017000000_audit_feedback.sql](supabase/migrations/20261017000000_audit_feedback.sql)
+   (jejak audit, riwayat mode, feedback). Database yang sudah berjalan cukup menjalankan file kedua ini.
    Harus tampil "Success".
 3. Buka **Table Editor**. Tabel `devices` harus berisi satu baris `emora-01`. Kalau tabelnya tidak ada, migration gagal dijalankan.
 4. Buka **Project Settings → API**, catat:
@@ -90,7 +98,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxx
 ```
 
 Contohnya ada di `apps/web/.env.example`. Kunci *publishable* memang boleh dipakai di browser (akses dibatasi RLS).
-**Saat ini dashboard belum membaca file ini**, jadi mengisinya belum mengubah tampilan.
+Bila kedua nilai terisi, dashboard berjalan dalam **mode live**. Opsional: `NEXT_PUBLIC_EMORA_DEVICE_ID` (bawaan `emora-01`).
+Setelah mengubah file ini, hentikan lalu jalankan ulang `npm run dev:web`.
 
 ## 4. Jalankan backend
 
@@ -149,7 +158,7 @@ Untuk data berkelanjutan tanpa hardware: `npm run simulate` di terminal lain.
 | PZEM-004T (catu) | 5V dan GND | Modul butuh 5 V. Periksa datasheet modul untuk level sinyal |
 | DHT22 | GPIO14 | Data suhu/kelembapan (+ VCC 3,3 V dan GND) |
 | Relai | GPIO26 | **Active LOW**: LOW = ON. Firmware menyalakan relai saat start |
-| Buzzer | GPIO27 | HIGH = bunyi saat ada anomali |
+| Buzzer | GPIO27 | Bip sebanyak jumlah masalah, lalu jeda (1 masalah = bip, 2 = bip-bip, dst.) |
 
 Pada tahap awal, pasang hanya sisi sinyal dulu (ESP32 + sensor lewat USB, sisi PLN belum disambung).
 Sisi PLN disambung terakhir, setelah wiring diperiksa.
@@ -162,7 +171,7 @@ Sisi PLN disambung terakhir, setelah wiring diperiksa.
    - `PZEM004Tv30` (oleh mandulaj)
    - `DHT sensor library` (oleh Adafruit)
    - `Adafruit Unified Sensor` (jika diminta)
-4. **File → Open** → `firmware/EMORA_FINAL/EMORA_FINAL.ino` (satu file, tidak perlu file lain).
+4. **File → Open** → `EMORA_FINAL/EMORA_FINAL.ino` (satu file, tidak perlu file lain).
 5. Di blok **PENGATURAN** di bagian atas file, isi lima nilai:
 
    ```cpp
@@ -216,7 +225,7 @@ Kalau kelima langkah berhasil, rantai ESP32 → backend → Supabase sudah aktif
 | Kode `404` | `DEVICE_ID` belum ada di tabel `devices`. Tambahkan barisnya, atau samakan dengan `emora-01`. |
 | Kode `400` | Format data ditolak backend. Lihat log terminal backend. |
 | Tidak pernah terhubung WiFi | SSID/password salah, atau WiFi 5 GHz. Gunakan 2,4 GHz. |
-| `Gagal membaca data dari sensor PZEM-004T!` | Wiring RX/TX PZEM tertukar, catu 5 V modul, atau modul belum teraliri listrik PLN. **Selama ini terjadi, tidak ada data yang dikirim ke backend.** |
+| `Gagal membaca sensor PZEM-004T` | Wiring RX/TX PZEM tertukar, catu 5 V modul, atau modul belum teraliri listrik PLN. ESP32 tetap mengirim data (nilai listrik `null`, suhu/kelembapan tetap), dan dashboard menampilkan "Sensor PZEM tidak terbaca". Alert listrik yang terbuka tidak ditutup selama sensor gagal. |
 | Suhu/kelembapan `null` di database | DHT22 gagal dibaca (wiring/pin 14). Data lain tetap dikirim. |
 | IP laptop berubah | Router memberi IP baru. Perbarui `API_URL`, upload ulang. Atur IP statis/reservasi di router agar tetap. |
 | Backend gagal start | `apps/api/.env` belum diisi atau salah. Cek `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY`. |
@@ -226,8 +235,9 @@ Kalau kelima langkah berhasil, rantai ESP32 → backend → Supabase sudah aktif
 
 - Firmware **tidak mengubah logika proteksi**: ambang batas, buzzer, dan relai sama dengan `EMORA.ino`, dan berjalan
   tanpa internet. Pengiriman data berjalan di task terpisah sehingga WiFi yang lambat tidak menunda alarm.
-- Relai pada firmware ini selalu menyala dan **tidak ada pemutusan otomatis** atau perintah jarak jauh. Fitur mode
-  otomatis/manual di dashboard belum terhubung ke firmware. Jangan andalkan sistem ini sebagai pengaman beban.
+- Relai bisa diputus/dinyalakan dari dashboard, tetapi **tidak ada pemutusan otomatis**. Bila WiFi/backend putus, relai
+  tetap pada keadaan terakhirnya. Saat ESP32 menyala, relai ON sebentar lalu mengikuti perintah terakhir dari dashboard
+  (bisa OFF) dalam beberapa detik setelah WiFi tersambung. Jangan andalkan sistem ini sebagai pengaman beban.
 - `API_URL` berawalan `http://` mengirim data tanpa enkripsi (cukup untuk jaringan rumah/lab). Untuk backend online
   pakai `https://`. Firmware saat ini memakai `setInsecure()` pada HTTPS (tidak memeriksa sertifikat server); ganti
   dengan sertifikat root sebelum dipakai sungguhan.
@@ -241,10 +251,10 @@ Kalau kelima langkah berhasil, rantai ESP32 → backend → Supabase sudah aktif
 1. **Skema multi-jalur**: dashboard memodelkan satu panel dengan banyak jalur (tiap jalur satu PZEM + relai), sedangkan
    tabel sekarang satu perangkat per pembacaan. Perlu tabel `channels` dan kolom `channel_id` di `readings`.
    Firmware pun perlu membaca beberapa PZEM bila memang banyak jalur.
-2. **Sambungkan dashboard ke Supabase** (ganti `apps/web/src/lib/store.ts`).
-3. **Kontrol relai dari dashboard**: perintah turun ke ESP32, mode otomatis/manual, feedback ke ML. Keputusan pemutusan
-   harus tetap di ESP32 (failsafe lokal bila WiFi putus).
-4. **Status sensor**: kirim data berkala dengan penanda `sensor_ok=false` saat PZEM gagal dibaca, supaya dashboard bisa
-   membedakan "perangkat mati" dari "sensor bermasalah".
+2. **Penulisan dari dashboard**: mode live (`apps/web/src/lib/live/sync.ts`) baru membaca. Ubah ambang, akui alert ke database, dan feedback perlu endpoint backend. Riwayat grafik hanya 24 jam terakhir.
+3. **Pemutusan otomatis dan login**: kontrol manual sudah ada, tetapi mode otomatis/manual, feedback ke ML, dan login belum.
+   Kunci kontrol saat ini terlihat di browser, jadi siapa pun di jaringan yang sama bisa mengontrol relai.
+4. **Riwayat kegagalan sensor** baru dicatat per sesi browser (ESP32 offline / PZEM / DHT22 tidak terbaca diturunkan dari
+   tabel `readings`). Untuk riwayat permanen perlu jenis alert baru di tabel `alerts` (migrasi skema).
 5. **Login** sebelum kontrol relai diaktifkan.
 6. Uji firmware pada hardware sungguhan, lalu perbaiki bila perlu.

@@ -1,4 +1,4 @@
-export type Param = "voltage" | "current" | "power" | "pf" | "frequency";
+export type Param = "voltage" | "current" | "power" | "pf" | "frequency" | "temperature" | "humidity";
 
 export interface Thresholds {
   voltMin: number;
@@ -7,6 +7,7 @@ export interface Thresholds {
   powerMax: number;
   pfMin: number;
   debounceSec: number;
+  tempMax?: number; // °C, hanya peringatan (tidak memicu trip)
 }
 
 export interface Sample {
@@ -17,12 +18,21 @@ export interface Sample {
   pf: number | null; // null saat relai OFF (tidak ada beban)
   frequency: number;
   energyKwh: number; // energi hari ini
+  temperature?: number | null; // °C (DHT22), hanya mode live
+  humidity?: number | null; // %
+}
+
+// Suhu & kelembapan panel (DHT22 di ESP32), terbaca walau PZEM gagal
+export interface PanelEnv {
+  ts: number;
+  temperature: number | null;
+  humidity: number | null;
 }
 
 // 'ask' = tanya tiap beban berlebih; 'auto' = putus otomatis; 'manual' = putus oleh pengguna (dengan pengaman waktu)
 export type CutMode = "ask" | "auto" | "manual";
 // 'failsafe' = sistem memutus karena keputusan tidak diambil tepat waktu atau batas keras terlampaui
-export type CutSource = "auto" | "manual" | "failsafe";
+export type CutSource = "auto" | "manual" | "failsafe" | "local"; // local = proteksi lokal ESP32 (mode live)
 
 export interface Jalur {
   id: string;
@@ -127,6 +137,7 @@ export interface LiveState {
   readings: Record<string, Sample | null>;
   lastSeen: Record<string, number>;
   panelRssi: number;
+  env?: PanelEnv | null; // mode live
 }
 
 export type JalurStatus = "normal" | "warning" | "trip" | "off" | "offline";

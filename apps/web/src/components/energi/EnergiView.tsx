@@ -13,7 +13,7 @@ import { dailyEnergy, dailyPf, recommendations, savingText } from "@/lib/analyti
 import { niceDomain } from "@/lib/chart";
 import { cn } from "@/lib/cn";
 import { PF_TARGET, TARIFF_PER_KWH } from "@/lib/constants";
-import { fmtDay, fmtDayLong, fmtNum, fmtRp } from "@/lib/format";
+import { fmtDay, fmtDayLong, fmtNum, fmtRp, fmtEnergyText } from "@/lib/format";
 import { actions, useApp, useLive } from "@/lib/store";
 import { seriesDefs, type SeriesDef } from "./seriesColors";
 
@@ -52,13 +52,13 @@ function Tip({ active, label, rows, total, unit, digits }: { active?: boolean; l
             <span className="h-0.5 w-3 rounded" style={{ background: r.color }} />
             {r.label}
           </span>
-          <span className="font-semibold text-fg tabular-nums">{r.value == null ? "—" : `${fmtNum(r.value, digits)} ${unit}`.trim()}</span>
+          <span className="font-semibold text-fg tabular-nums">{r.value == null ? "—" : unit === "kWh" ? fmtEnergyText(r.value) : `${fmtNum(r.value, digits)} ${unit}`.trim()}</span>
         </div>
       ))}
       {total != null && (
         <div className="mt-1 flex justify-between border-t border-line pt-1.5 font-semibold text-fg">
           <span>Total</span>
-          <span className="tabular-nums">{fmtNum(total, digits)} {unit}</span>
+          <span className="tabular-nums">{unit === "kWh" ? fmtEnergyText(total) : `${fmtNum(total, digits)} ${unit}`}</span>
         </div>
       )}
     </div>
@@ -152,7 +152,7 @@ export function EnergiView() {
               <h2 className="text-lg font-medium text-fg">Konsumsi energi harian</h2>
               <p className="mt-1 text-[13px] text-fg-3">kWh per jalur</p>
             </div>
-            <p className="text-lg font-semibold whitespace-nowrap text-fg tabular-nums">{fmtNum(totalKwh, 1)} kWh</p>
+            <p className="text-lg font-semibold whitespace-nowrap text-fg tabular-nums">{fmtEnergyText(totalKwh)}</p>
           </div>
           <div role="img" aria-label="Grafik batang konsumsi energi harian per jalur" className="mt-4 h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -211,7 +211,7 @@ export function EnergiView() {
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-primary-soft">
                         <div className="h-full rounded-full bg-primary-solid" style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="w-24 text-right text-xs text-fg-3 tabular-nums">{fmtNum(kwh, 1)} kWh</span>
+                      <span className="w-24 text-right text-xs text-fg-3 tabular-nums">{fmtEnergyText(kwh)}</span>
                     </div>
                   </li>
                 );

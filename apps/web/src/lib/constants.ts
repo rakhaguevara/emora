@@ -34,6 +34,8 @@ export const PARAM_META = {
   power: { label: "Daya", unit: "W", digits: 0 },
   pf: { label: "Faktor daya", unit: "PF", digits: 2 },
   frequency: { label: "Frekuensi", unit: "Hz", digits: 1 },
+  temperature: { label: "Suhu", unit: "°C", digits: 1 },
+  humidity: { label: "Kelembapan", unit: "%", digits: 0 },
 } as const;
 
 export const EVENT_TYPE_LABEL = {
@@ -60,4 +62,5 @@ export const CUT_SOURCE_LABEL = {
   auto: "Otomatis",
   manual: "Manual",
   failsafe: "Pengaman",
+  local: "Proteksi ESP32",
 } as const;

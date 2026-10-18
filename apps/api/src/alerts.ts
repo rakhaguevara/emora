@@ -4,6 +4,9 @@ export type AlertType =
   | 'undervoltage' | 'overvoltage' | 'overcurrent' | 'overpower'
   | 'overheat' | 'frequency' | 'power_factor' | 'energy_hourly';
 
+// Jenis alert yang tidak memicu pemutusan relai: suhu panel (DHT22) hanya peringatan.
+export const NO_TRIP: ReadonlySet<AlertType> = new Set(['overheat']);
+
 export interface Violation {
   type: AlertType;
   value: number;
@@ -31,7 +34,8 @@ export function evaluate(t: Telemetry, th: Thresholds): Violation[] {
       value: frequency,
       threshold: frequency < th.freq_min ? th.freq_min : th.freq_max,
     });
-  if (pf != null && pf < th.pf_min && (power ?? 0) > 5)
+  // PF hanya berarti bila ada beban (di bawah ~1 W PZEM membaca PF 0)
+  if (pf != null && pf < th.pf_min && (power ?? 0) > 1)
     out.push({ type: 'power_factor', value: pf, threshold: th.pf_min });
   if (hourly_energy_wh != null && hourly_energy_wh > th.energy_hourly_max_wh)
     out.push({ type: 'energy_hourly', value: hourly_energy_wh, threshold: th.energy_hourly_max_wh });

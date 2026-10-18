@@ -1,6 +1,6 @@
 import { cn } from "@/lib/cn";
 import { TARIFF_PER_KWH } from "@/lib/constants";
-import { fmtNum, fmtRp, fmtRpShort } from "@/lib/format";
+import { fmtNum, fmtRp, fmtRpShort, fmtEnergy } from "@/lib/format";
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
   return (
@@ -29,8 +29,8 @@ export function EnergyCard({
         <div className="pr-5">
           <p className="text-[15px] text-fg-2">Energi hari ini</p>
           <p className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-[26px] leading-none font-semibold text-fg tabular-nums">{fmtNum(kwh, 1)}</span>
-            <span className="text-[13px] text-fg-3">kWh</span>
+            <span className="text-[26px] leading-none font-semibold text-fg tabular-nums">{fmtEnergy(kwh).value}</span>
+            <span className="text-[13px] text-fg-3">{fmtEnergy(kwh).unit}</span>
           </p>
         </div>
         <div className="min-w-0 flex-1 border-l border-line pl-5">

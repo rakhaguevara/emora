@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { FeedbackHost } from "@/components/overload/FeedbackDialog";
+import { LiveAnomalyHost } from "@/components/overload/LiveAnomalyHost";
 import { OverloadHost } from "@/components/overload/OverloadHost";
 import { ToastHost } from "@/components/ui/ToastHost";
 import { BottomNav } from "./BottomNav";
@@ -16,6 +17,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-h-screen min-w-0 flex-col">
         <Topbar />
         <OverloadHost />
+        <LiveAnomalyHost />
         <main className="mx-auto w-full max-w-[1320px] flex-1 px-4 py-5 pb-24 sm:px-6 sm:py-6 lg:pb-6">{children}</main>
       </div>
 

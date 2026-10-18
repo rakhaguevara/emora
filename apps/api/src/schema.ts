@@ -17,6 +17,9 @@ export const telemetrySchema = z.object({
   hourly_energy_wh: num,
   relay_on: z.boolean().optional(),
   buzzer_on: z.boolean().optional(),
+  // Proteksi lokal ESP32: relai diputus ESP32 sendiri. local_trip_at = millis() saat memutus (penanda kejadian).
+  local_trip_at: z.number().int().positive().nullable().optional(),
+  local_trip_reason: z.string().max(160).nullable().optional(),
 });
 
 export type Telemetry = z.infer<typeof telemetrySchema>;

@@ -9,6 +9,8 @@ export const config = {
   supabaseUrl: required('SUPABASE_URL'),
   supabaseServiceKey: required('SUPABASE_SERVICE_ROLE_KEY'),
   ingestApiKey: required('INGEST_API_KEY'),
+  // Kosong = kontrol relai dari dashboard dinonaktifkan
+  controlApiKey: process.env.CONTROL_API_KEY || null,
   mqtt: {
     url: process.env.MQTT_URL || null,
     username: process.env.MQTT_USERNAME || undefined,

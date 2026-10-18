@@ -4,15 +4,106 @@ import { useSyncExternalStore } from "react";
 import { CUT_MODE_LABEL, DECISION_SEC, DEFAULT_THRESHOLDS, HARD_LIMIT_RATIO, WARN_RATIO } from "./constants";
 import { activeEvents, jalurLabel } from "./derive";
 import { fmtNum } from "./format";
-import { sampleAt } from "./sim/engine";
+import { notifyChanges, vibrate } from "./live/notify";
+import {
+  ackLive, blockingAnomalies, buildLiveApp, isLiveOnline, latestEnv, clearLive, dismissRec, executeRec, getCommand, getLinkStatus, getMode, getRecs, recDeadline,
+  sendFeedback, sendRelayCommand, setDeviceMode, isSensorOk, isSynced, latestLive, LIVE_ENABLED, liveStatusKey, startLiveSync,
+  type LinkStatus,
+} from "./live/sync";
+import { energyKwhBetween, sampleAt, startOfDay } from "./sim/engine";
 import { seedState, STORE_VERSION } from "./sim/seed";
 import { toast } from "./toast";
 import { ui } from "./ui";
 import type { AlertEvent, AppState, Cause, CutMode, CutSource, Feedback, Hold, Jalur, LiveState, Outcome, Sample, Thresholds, Timing } from "./types";
 
-// Penyimpanan data demo di browser. Semua tindakan (relai, ambang, akui, tambah jalur)
-// bekerja terhadap state ini dan disimpan di localStorage. Saat backend siap, lapisan ini
-// diganti dengan pemanggilan API/Supabase tanpa mengubah komponen.
+// Dua mode:
+// - Demo (bawaan): semua data disimulasikan dan disimpan di localStorage.
+// - Live (bila kunci Supabase diisi di .env.local): satu jalur dari ESP32, data dibaca dari Supabase
+//   (lihat live/sync.ts). Tindakan yang belum didukung firmware/backend hanya menampilkan pemberitahuan.
+export const isLive = LIVE_ENABLED;
+export const liveLinkStatus = (): LinkStatus => getLinkStatus();
+export const liveMode = getMode;
+export const liveRecs = getRecs;
+export const liveRecDeadline = recDeadline;
+export type { RecRow } from "./live/sync";
+
+// Status rekomendasi yang terakhir dilihat, untuk memberi tahu saat berubah (diputus / normal kembali)
+const recSeen = new Map<number, string>();
+let recPrimed = false;
+// Rekomendasi yang diputus lewat tombol "Putus sekarang" (bukan otomatis/pengaman)
+const userExecuted = new Set<number>();
+
+function watchRecs() {
+  for (const r of getRecs()) {
+    const prev = recSeen.get(r.id);
+    recSeen.set(r.id, r.status);
+    if (!recPrimed || prev === r.status || prev !== "pending") continue;
+    const evId = `rec${r.id}`;
+    if (r.status === "executed" && userExecuted.has(r.id)) {
+      ui.openFeedback(evId); // operator memutus sendiri: langsung minta feedback
+    } else if (r.status === "executed") {
+      const ev = app?.events.find((e) => e.id === evId);
+      const by = ev?.cutSource === "local" ? "oleh proteksi lokal ESP32" : ev?.cutSource === "failsafe" ? "oleh pengaman" : "otomatis";
+      toast(`Relai diputus ${by}: ${r.reason ?? "anomali"}`, "error", { label: "Beri feedback", onClick: () => ui.openFeedback(evId) }, 0);
+      vibrate([200, 100, 200]);
+    } else if (r.status === "expired") {
+      toast("Nilai kembali normal sebelum waktu habis, relai tidak diputus", "success");
+    }
+  }
+  recPrimed = true;
+}
+
+// Pemutusan oleh proteksi lokal ESP32 tanpa rekomendasi (mis. batas kritis, backend tak terjangkau)
+const localSeen = new Set<string>();
+let localPrimed = false;
+function watchLocalTrips(events: AlertEvent[]) {
+  for (const e of events) {
+    if (!e.id.startsWith("local") || localSeen.has(e.id)) continue;
+    localSeen.add(e.id);
+    if (!localPrimed) continue;
+    toast(`Relai diputus proteksi lokal ESP32: ${e.detail ?? "batas kritis"}`, "error", { label: "Beri feedback", onClick: () => ui.openFeedback(e.id) }, 0);
+    vibrate([200, 100, 200]);
+  }
+  localPrimed = true;
+}
+
+let lastStatusKey = "";
+
+// Perintah relai yang menunggu konfirmasi ESP32 (dipantau tiap detik oleh tick)
+let pendingCmd: { id: number; action: "on" | "off"; at: number } | null = null;
+const CMD_TIMEOUT_MS = 15_000;
+
+function watchCommand(now: number) {
+  if (!pendingCmd) return;
+  const c = getCommand(pendingCmd.id);
+  const what = pendingCmd.action === "on" ? "ON" : "OFF";
+  if (c?.status === "acked") {
+    toast(`Relai ${what}: dikonfirmasi ESP32`, "success");
+    pendingCmd = null;
+  } else if (c?.status === "failed") {
+    toast(`Relai ${what} gagal diterapkan ESP32`, "error");
+    pendingCmd = null;
+  } else if (now - pendingCmd.at > CMD_TIMEOUT_MS) {
+    toast(
+      `ESP32 belum mengonfirmasi relai ${what} setelah ${CMD_TIMEOUT_MS / 1000} detik. Pastikan ESP32 menyala, tersambung WiFi, dan memakai firmware terbaru. Perintah tetap tersimpan dan diterapkan saat ESP32 tersambung.`,
+      "error", undefined, 0,
+    );
+    pendingCmd = null;
+  }
+}
+
+// Mode live: susun ulang state dari data Supabase dan munculkan pop-up untuk masalah baru.
+function rebuildLive(now = Date.now()) {
+  app = buildLiveApp(app, now);
+  watchCommand(now);
+  if (isSynced()) {
+    watchRecs();
+    watchLocalTrips(app.events);
+  }
+  lastStatusKey = liveStatusKey(now);
+  if (isSynced()) notifyChanges(app.events, app.jalur[0]?.relayOn ?? false);
+  appListeners.forEach((l) => l());
+}
 
 const KEY = "emora.demo.v2";
 
@@ -71,6 +162,17 @@ function makeEvent(j: Jalur, p: Partial<AlertEvent> & Pick<AlertEvent, "type" | 
 }
 
 function computeLive(now: number, prev?: LiveState): LiveState {
+  if (LIVE_ENABLED) {
+    const latest = latestLive();
+    const readings: LiveState["readings"] = {};
+    const lastSeen: LiveState["lastSeen"] = {};
+    for (const j of app!.jalur) {
+      readings[j.id] =
+        latest && isSensorOk(now) ? { ...latest, energyKwh: energyKwhBetween(app!, j, startOfDay(now), now) } : null;
+      lastSeen[j.id] = latest?.ts ?? now;
+    }
+    return { now, readings, lastSeen, panelRssi: prev?.panelRssi ?? 0, env: isLiveOnline(now) ? latestEnv() : null };
+  }
   const readings: LiveState["readings"] = {};
   const lastSeen: LiveState["lastSeen"] = { ...(prev?.lastSeen ?? {}) };
   for (const j of app!.jalur) {
@@ -288,14 +390,33 @@ function tripJalur(jalurId: string, param: "current" | "power", s: Sample | null
 
 function tick() {
   const now = Date.now();
+  if (LIVE_ENABLED) {
+    // Status online berubah karena waktu berjalan, bukan karena data baru: bangun ulang state.
+    if (liveStatusKey(now) !== lastStatusKey) rebuildLive(now);
+    else watchCommand(now);
+  }
   live = computeLive(now, live ?? undefined);
-  evaluate(now, live.readings);
+  if (!LIVE_ENABLED) evaluate(now, live.readings);
   liveListeners.forEach((l) => l());
 }
 
 function init() {
   if (started || typeof window === "undefined") return;
   started = true;
+  if (LIVE_ENABLED) {
+    app = buildLiveApp(null, Date.now());
+    live = computeLive(Date.now());
+    startLiveSync(
+      () => {
+        rebuildLive();
+        live = computeLive(Date.now(), live ?? undefined);
+        liveListeners.forEach((l) => l());
+      },
+      (msg) => toast(`Gagal membaca Supabase: ${msg}`, "error"),
+    );
+    setInterval(tick, 1000);
+    return;
+  }
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -354,8 +475,33 @@ export function useLive(): LiveState | null {
 
 const userName = () => app!.user.name;
 
+// Mode live: tindakan yang butuh perintah ke ESP32 atau penulisan ke Supabase belum tersedia.
+function liveBlocked(what: string): boolean {
+  if (!LIVE_ENABLED) return false;
+  toast(`${what} belum tersedia di mode live: firmware dan backend belum mendukung perintah dari dashboard`, "info");
+  return true;
+}
+
 export const actions = {
-  setRelay(jalurId: string, on: boolean) {
+  // reason: alasan operator (wajib di mode live, dicatat di relay_commands)
+  setRelay(jalurId: string, on: boolean, reason = "") {
+    if (LIVE_ENABLED) {
+      const action = on ? "on" : "off";
+      // Backend juga menolak perintah ini; dicek di sini agar tidak mengirim perintah yang pasti gagal.
+      const blocking = on && getMode() === "auto" ? blockingAnomalies() : [];
+      if (blocking.length) {
+        toast(`Mode otomatis: relai tidak bisa dinyalakan selama anomali ${blocking.join(", ").toLowerCase()} masih aktif`, "error");
+        return;
+      }
+      toast(`Mengirim perintah relai ${on ? "ON" : "OFF"} ke ESP32...`, "info");
+      sendRelayCommand(action, reason)
+        .then((c) => {
+          pendingCmd = { id: c.id, action, at: Date.now() };
+          rebuildLive();
+        })
+        .catch((err: Error) => toast(`Perintah relai gagal: ${err.message}`, "error", undefined, 0));
+      return;
+    }
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j || j.relayOn === on) return;
     // Mematikan saat beban berlebih menunggu keputusan = pemutusan manual (minta feedback)
@@ -393,6 +539,17 @@ export const actions = {
   },
 
   setCutMode(jalurId: string, mode: CutMode) {
+    if (LIVE_ENABLED) {
+      const m = mode === "auto" ? "auto" : "semi_auto";
+      if (getMode() === m) return;
+      setDeviceMode(m)
+        .then(() => {
+          rebuildLive();
+          toast(`Mode pemutusan: ${m === "auto" ? "Otomatis" : "Semi-otomatis"}`, "success");
+        })
+        .catch((err: Error) => toast(`Gagal mengubah mode: ${err.message}`, "error", undefined, 0));
+      return;
+    }
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j || j.cutMode === mode) return;
     const now = Date.now();
@@ -414,6 +571,7 @@ export const actions = {
 
   // Keputusan pengguna saat beban berlebih: putus otomatis atau tangani manual.
   decideOverload(jalurId: string, choice: "auto" | "manual", remember: boolean) {
+    if (liveBlocked("Pemutusan relai")) return;
     const h = app!.holds[jalurId];
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!h || !j) return;
@@ -428,8 +586,17 @@ export const actions = {
     }
   },
 
+  // Mode live: tombol pada pop-up anomali
+  cutAnomaly(id: number) {
+    sendRec(id, "execute");
+  },
+  ignoreAnomaly(id: number) {
+    sendRec(id, "dismiss");
+  },
+
   // Pengguna mematikan relai sendiri sebagai respons beban berlebih -> minta feedback.
   manualCut(jalurId: string) {
+    if (liveBlocked("Pemutusan relai")) return;
     const h = app!.holds[jalurId];
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!h || !j) return;
@@ -438,6 +605,15 @@ export const actions = {
   },
 
   submitFeedback(eventId: string, d: { outcome: Outcome; timing: Timing; cause: Cause; comment: string }) {
+    if (LIVE_ENABLED) {
+      sendFeedback(eventId, d)
+        .then(() => {
+          rebuildLive();
+          toast("Feedback tersimpan untuk pembelajaran sistem", "success");
+        })
+        .catch((err: Error) => toast(`Feedback gagal disimpan: ${err.message}`, "error", undefined, 0));
+      return;
+    }
     const ev = app!.events.find((e) => e.id === eventId);
     if (!ev || !ev.cutSource || ev.value == null || ev.limit == null) return;
     const fb: Feedback = {
@@ -455,6 +631,7 @@ export const actions = {
 
   // Alat demo: memicu lonjakan arus pada satu jalur agar alur beban berlebih bisa dicoba.
   simulateOverload(jalurId: string, seconds = 90) {
+    if (liveBlocked("Simulasi beban berlebih")) return;
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j || !j.relayOn || !j.sensorOnline) return;
     const now = Date.now();
@@ -469,13 +646,35 @@ export const actions = {
   },
 
   acknowledge(eventId: string) {
+    if (LIVE_ENABLED) {
+      ackLive(eventId);
+      rebuildLive();
+      return;
+    }
     setApp((st) => ({
       ...st,
       events: st.events.map((e) => (e.id === eventId ? { ...e, acknowledged: true, handledBy: st.user.name } : e)),
     }));
   },
 
+  // Menghapus semua kejadian dari daftar. Mode live: hanya disembunyikan di browser ini, data Supabase tetap.
+  clearEvents() {
+    const now = Date.now();
+    if (LIVE_ENABLED) {
+      clearLive(now);
+      rebuildLive(now);
+    } else {
+      // Kejadian yang masih ditunggu keputusannya (hold) tetap disimpan agar dialog beban berlebih tidak rusak.
+      setApp((st) => {
+        const keep = new Set(Object.values(st.holds).map((h) => h.eventId));
+        return { ...st, events: st.events.filter((e) => keep.has(e.id)) };
+      });
+    }
+    toast("Notifikasi dibersihkan", "success");
+  },
+
   saveThresholds(jalurId: string, th: Thresholds) {
+    if (liveBlocked("Mengubah ambang (ubah di Supabase, tabel devices)")) return;
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j) return;
     const o = j.thresholds;
@@ -502,7 +701,8 @@ export const actions = {
     toast(`Ambang ${jalurLabel(j)} disimpan`, "success");
   },
 
-  addJalur(name: string, sensorId: string): Jalur {
+  addJalur(name: string, sensorId: string): Jalur | null {
+    if (liveBlocked("Menambah jalur")) return null;
     const number = Math.max(0, ...app!.jalur.map((j) => j.number)) + 1;
     const now = Date.now();
     const j: Jalur = {
@@ -518,11 +718,13 @@ export const actions = {
   },
 
   renameJalur(jalurId: string, name: string) {
+    if (liveBlocked("Mengganti nama jalur")) return;
     setApp((st) => ({ ...st, jalur: st.jalur.map((j) => (j.id === jalurId ? { ...j, name } : j)) }));
     toast("Nama jalur diperbarui", "success");
   },
 
   removeJalur(jalurId: string) {
+    if (liveBlocked("Menghapus jalur")) return;
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j) return;
     setApp((st) => ({ ...st, jalur: st.jalur.filter((x) => x.id !== jalurId) }));
@@ -532,7 +734,11 @@ export const actions = {
   testConnection(jalurId: string): { ok: boolean; message: string } {
     const j = app!.jalur.find((x) => x.id === jalurId);
     if (!j) return { ok: false, message: "Jalur tidak ditemukan" };
-    const res = j.sensorOnline
+    const res = LIVE_ENABLED
+      ? j.sensorOnline
+        ? { ok: true, message: `${j.sensorId} mengirim data` }
+        : { ok: false, message: `${j.sensorId} tidak mengirim data. Periksa ESP32, WiFi, dan backend.` }
+      : j.sensorOnline
       ? { ok: true, message: `${j.sensorId} merespons` }
       : { ok: false, message: `${j.sensorId} tidak merespons. Periksa kabel RS485 dan catu daya sensor.` };
     toast(res.message, res.ok ? "success" : "error");
@@ -544,11 +750,13 @@ export const actions = {
   },
 
   updateFacility(name: string, panelName: string, limitW: number) {
+    if (liveBlocked("Pengaturan panel")) return;
     setApp((st) => ({ ...st, facility: { name, panelName }, panel: { ...st.panel, limitW } }));
     toast("Pengaturan panel disimpan", "success");
   },
 
   resetDemo() {
+    if (liveBlocked("Setel ulang data demo")) return;
     app = seedState(Date.now());
     for (const k of Object.keys(overSince)) delete overSince[k];
     for (const k of Object.keys(condSince)) delete condSince[k];
@@ -560,5 +768,17 @@ export const actions = {
     toast("Data demo disetel ulang", "info");
   },
 };
+
+function sendRec(id: number, op: "execute" | "dismiss") {
+  if (op === "execute") userExecuted.add(id);
+  (op === "execute" ? executeRec(id) : dismissRec(id))
+    .then(() =>
+      toast(op === "execute" ? "Perintah putus relai dikirim ke ESP32" : "Rekomendasi diabaikan, relai tetap menyala", "info"),
+    )
+    .catch((err: Error) => {
+      userExecuted.delete(id);
+      toast(`Gagal: ${err.message}`, "error", undefined, 0);
+    });
+}
 
 export const activeCount = (s: AppState) => activeEvents(s).length;

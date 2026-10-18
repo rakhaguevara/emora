@@ -2,14 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ConfirmRelayOff } from "@/components/jalur/ConfirmRelayOff";
+import { ConfirmRelay, type RelayAction } from "@/components/jalur/ConfirmRelay";
 import { Card } from "@/components/ui/Card";
 import { PageSkeleton } from "@/components/ui/PageHeader";
 import { formatTick, niceDomain, timeTicks } from "@/lib/chart";
 import { jalurStatus } from "@/lib/derive";
-import { fmtAgo, fmtDay, fmtHM, fmtNum } from "@/lib/format";
+import { fmtAgo, fmtDay, fmtHM, fmtNum, fmtSmart, tickDigits } from "@/lib/format";
 import { computeOverview } from "@/lib/overview";
-import { actions, useApp, useLive } from "@/lib/store";
+import { actions, isLive, useApp, useLive } from "@/lib/store";
 import type { Jalur, JalurStatus } from "@/lib/types";
 import { EnergyCard } from "./EnergyCard";
 import { JalurCard } from "./JalurCard";
@@ -22,7 +22,7 @@ import { SummaryCarousel } from "./SummaryCarousel";
 export function RingkasanView() {
   const app = useApp();
   const live = useLive();
-  const [confirm, setConfirm] = useState<Jalur | null>(null);
+  const [confirm, setConfirm] = useState<{ j: Jalur; action: RelayAction } | null>(null);
 
   const minute = live ? Math.floor(live.now / 60e3) : 0;
   const to = minute * 60e3;
@@ -55,7 +55,11 @@ export function RingkasanView() {
   const running = rows.filter((r) => r.j.relayOn && r.j.sensorOnline).length;
   const lastSeen = Math.max(0, ...Object.values(live.lastSeen));
 
-  const chart = heavy.total.map((p) => ({ ts: p.ts, kw: p.w / 1000 }));
+  // Beban kecil (< 1 kW) ditampilkan dalam W agar grafik tidak rata di 0 kW
+  const peakW = Math.max(0, ...heavy.total.map((p) => p.w));
+  const inW = peakW < 1000;
+  const unit = inW ? "W" : "kW";
+  const chart = heavy.total.map((p) => ({ ts: p.ts, kw: inW ? p.w : p.w / 1000 }));
   const scale = niceDomain(0, Math.max(1, ...chart.map((t) => t.kw)) * 1.1, 4);
 
   return (
@@ -102,8 +106,8 @@ export function RingkasanView() {
             items={rows}
             render={({ j, s, status }) => (
               <JalurCard
-                key={j.id} jalur={j} sample={s} status={status}
-                onRelay={(next) => (next ? actions.setRelay(j.id, true) : setConfirm(j))}
+                key={j.id} jalur={j} sample={s} status={status} temperature={isLive ? (live.env?.temperature ?? null) : undefined}
+                onRelay={(next) => setConfirm({ j, action: next ? "on" : "off" })}
               />
             )}
           />
@@ -122,7 +126,7 @@ export function RingkasanView() {
                 tickFormatter={(v: number) => formatTick(v, "24h")} tick={{ fill: "var(--fg-3)", fontSize: 11 }}
                 tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={10}
               />
-              <YAxis domain={scale.domain} ticks={scale.ticks} width={52} tickFormatter={(v: number) => `${fmtNum(v, 0)} kW`}
+              <YAxis domain={scale.domain} ticks={scale.ticks} width={52} tickFormatter={(v: number) => `${fmtNum(v, tickDigits(scale.ticks))} ${unit}`}
                 tick={{ fill: "var(--fg-3)", fontSize: 11 }} tickLine={false} axisLine={false} />
               <Tooltip
                 isAnimationActive={false} cursor={{ stroke: "var(--fg-3)" }}
@@ -132,7 +136,7 @@ export function RingkasanView() {
                   return (
                     <div className="rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-[var(--shadow)]">
                       <div className="text-fg-3">{fmtDay(p.ts)}, {fmtHM(p.ts)}</div>
-                      <div className="mt-0.5 text-sm font-semibold text-fg">{fmtNum(p.kw, 2)} kW</div>
+                      <div className="mt-0.5 text-sm font-semibold text-fg">{inW ? fmtSmart(p.kw, 0) : fmtNum(p.kw, 2)} {unit}</div>
                     </div>
                   );
                 }}
@@ -144,7 +148,7 @@ export function RingkasanView() {
         </div>
       </Card>
 
-      <ConfirmRelayOff jalur={confirm} onClose={() => setConfirm(null)} />
+      <ConfirmRelay jalur={confirm?.j ?? null} action={confirm?.action ?? null} onClose={() => setConfirm(null)} />
     </div>
   );
 }

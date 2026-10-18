@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { FREQ_MAX, FREQ_MIN, PARAM_META } from "@/lib/constants";
 import { formatTick, niceDomain, RANGE_META, timeTicks, type RangeKey } from "@/lib/chart";
-import { fmtDay, fmtHM, fmtNum } from "@/lib/format";
+import { fmtDay, fmtHM, fmtNum, fmtSmart, tickDigits } from "@/lib/format";
 import { series, type Point } from "@/lib/sim/engine";
 import type { AppState, Jalur, Param } from "@/lib/types";
 
@@ -25,6 +25,8 @@ function limitsFor(j: Jalur, param: Param): Limit[] {
     case "power": return [{ value: t.powerMax, label: `Batas ${f(t.powerMax)}` }];
     case "pf": return [{ value: t.pfMin, label: `Batas min. ${f(t.pfMin)}` }];
     case "frequency": return [{ value: FREQ_MIN, label: `Batas ${fmtNum(FREQ_MIN, 1)} Hz` }, { value: FREQ_MAX, label: `Batas ${fmtNum(FREQ_MAX, 1)} Hz` }];
+    case "temperature": return t.tempMax != null ? [{ value: t.tempMax, label: `Batas ${f(t.tempMax)} (peringatan)` }] : [];
+    case "humidity": return [];
   }
 }
 
@@ -53,7 +55,7 @@ function ChartTooltip({ active, payload, param }: { active?: boolean; payload?: 
     <div className="rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-[var(--shadow)]">
       <div className="text-fg-3">{fmtDay(p.ts)}, {fmtHM(p.ts)}</div>
       <div className="mt-0.5 text-sm font-semibold text-fg">
-        {p.value == null ? "Tidak ada data" : `${fmtNum(p.value, m.digits)} ${m.unit}`}
+        {p.value == null ? "Tidak ada data" : `${fmtSmart(p.value, m.digits)} ${m.unit}`}
       </div>
     </div>
   );
@@ -126,7 +128,7 @@ export function ParameterChart({
             />
             <YAxis
               domain={scale.domain} ticks={scale.ticks} width={52}
-              tickFormatter={(v: number) => `${fmtNum(v, param === "pf" ? 2 : param === "frequency" ? 1 : 0)}${param === "pf" ? "" : " " + m.unit}`}
+              tickFormatter={(v: number) => `${fmtNum(v, Math.max(param === "pf" ? 2 : param === "frequency" ? 1 : 0, tickDigits(scale.ticks)))}${param === "pf" ? "" : " " + m.unit}`}
               tick={{ fill: "var(--fg-3)", fontSize: 11 }} tickLine={false} axisLine={false}
             />
             {limits.map((l) => (
@@ -153,7 +155,7 @@ export function ParameterChart({
         <thead><tr><th>Waktu</th><th>{m.label} ({m.unit})</th></tr></thead>
         <tbody>
           {tableRows.map((d) => (
-            <tr key={d.ts}><td>{fmtDay(d.ts)} {fmtHM(d.ts)}</td><td>{d.value == null ? "tidak ada data" : fmtNum(d.value, m.digits)}</td></tr>
+            <tr key={d.ts}><td>{fmtDay(d.ts)} {fmtHM(d.ts)}</td><td>{d.value == null ? "tidak ada data" : fmtSmart(d.value, m.digits)}</td></tr>
           ))}
         </tbody>
       </table>

@@ -14,19 +14,19 @@ import { cn } from "@/lib/cn";
 import { RANGE_META, type RangeKey } from "@/lib/chart";
 import { FREQ_MAX, FREQ_MIN, PARAM_META } from "@/lib/constants";
 import { activeEvents, jalurLabel, jalurStatus } from "@/lib/derive";
-import { dayDiff, fmtAgo, fmtHM, fmtNum, fmtTime, fmtDay } from "@/lib/format";
+import { dayDiff, fmtAgo, fmtHM, fmtNum, fmtTime, fmtDay, fmtSmart, fmtEnergy } from "@/lib/format";
 import { rangeStats } from "@/lib/sim/engine";
-import { actions, useApp, useLive } from "@/lib/store";
+import { actions, isLive, useApp, useLive } from "@/lib/store";
 import type { Param } from "@/lib/types";
 import { ui } from "@/lib/ui";
-import { ConfirmRelayOff } from "./ConfirmRelayOff";
+import { ConfirmRelay, type RelayAction } from "./ConfirmRelay";
 import { CutModeCard } from "./CutModeCard";
 import { FeedbackInsights } from "./FeedbackInsights";
 import { MetricCard } from "./MetricCard";
 import { ParameterChart } from "./ParameterChart";
 import { ThresholdForm } from "./ThresholdForm";
 
-const PARAMS: Param[] = ["current", "voltage", "power", "pf", "frequency"];
+const PARAMS: Param[] = ["current", "voltage", "power", "pf", "frequency", ...(isLive ? (["temperature", "humidity"] as Param[]) : [])];
 const RANGES: RangeKey[] = ["1h", "24h", "7d", "30d"];
 
 function whenText(ts: number, now: number, withSeconds = true): string {
@@ -55,7 +55,7 @@ function Inner() {
   const initialRange = (RANGES as string[]).includes(search.get("range") ?? "") ? (search.get("range") as RangeKey) : "24h";
   const [param, setParam] = useState<Param>(initialParam);
   const [range, setRange] = useState<RangeKey>(initialRange);
-  const [confirmOff, setConfirmOff] = useState(false);
+  const [confirmRelay, setConfirmRelay] = useState<RelayAction | null>(null);
 
   const j = app?.jalur.find((x) => String(x.number) === params.id);
   const minute = live ? Math.floor(live.now / 60e3) : 0;
@@ -69,7 +69,7 @@ function Inner() {
     const extra = j.relayOn ? null : j.offSnapshot;
     const now = minute * 60e3;
     return Object.fromEntries(
-      (["voltage", "current", "power", "pf", "frequency"] as Param[]).map((p) => [p, rangeStats(app, j, p, now, extra)]),
+      PARAMS.map((p) => [p, rangeStats(app, j, p, now, extra)]),
     ) as Record<Param, { min: number; max: number } | null>;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app?.anomalies, app?.seededAt, jOffLog, j?.relayOn, j?.offSnapshot, j?.number, j?.offlineSince, minute]);
@@ -94,12 +94,25 @@ function Inner() {
   const v = display;
   const cards: { p: Param | "energy"; label: string; value: string; unit: string; limit: string; alert: boolean }[] = [
     { p: "voltage", label: "Tegangan", value: v ? fmtNum(v.voltage, 1) : "—", unit: "V", limit: `Batas: ${fmtNum(th.voltMin, 0)}–${fmtNum(th.voltMax, 0)} V`, alert: !!v && (v.voltage < th.voltMin || v.voltage > th.voltMax) },
-    { p: "current", label: "Arus", value: v ? fmtNum(v.current, 1) : "—", unit: "A", limit: `Batas: Maks. ${fmtNum(th.currentMax, 1)} A`, alert: !!v && v.current > th.currentMax },
-    { p: "power", label: "Daya", value: v ? fmtNum(v.power, 0) : "—", unit: "W", limit: `Batas: Maks. ${fmtNum(th.powerMax, 0)} W`, alert: !!v && v.power > th.powerMax },
+    { p: "current", label: "Arus", value: v ? fmtSmart(v.current, 1) : "—", unit: "A", limit: `Batas: Maks. ${fmtNum(th.currentMax, 1)} A`, alert: !!v && v.current > th.currentMax },
+    { p: "power", label: "Daya", value: v ? fmtSmart(v.power, 0) : "—", unit: "W", limit: `Batas: Maks. ${fmtNum(th.powerMax, 0)} W`, alert: !!v && v.power > th.powerMax },
     { p: "pf", label: "Faktor daya", value: v?.pf != null ? fmtNum(v.pf, 2) : "—", unit: "PF", limit: `Batas: Min. ${fmtNum(th.pfMin, 2)}`, alert: !!v && v.pf != null && v.pf < th.pfMin },
     { p: "frequency", label: "Frekuensi", value: v ? fmtNum(v.frequency, 1) : "—", unit: "Hz", limit: `Batas: ${fmtNum(FREQ_MIN, 1)}–${fmtNum(FREQ_MAX, 1)} Hz`, alert: !!v && (v.frequency < FREQ_MIN || v.frequency > FREQ_MAX) },
-    { p: "energy", label: "Energi", value: v ? fmtNum(v.energyKwh, 1) : "—", unit: "kWh", limit: "Batas: Tanpa batas", alert: false },
+    { p: "energy", label: "Energi", value: v ? fmtEnergy(v.energyKwh).value : "—", unit: v ? fmtEnergy(v.energyKwh).unit : "kWh", limit: "Batas: Tanpa batas", alert: false },
   ];
+  if (isLive) {
+    // DHT22 di panel: tetap terbaca walau PZEM gagal. Suhu hanya peringatan, tidak memicu trip.
+    const t = live.env?.temperature;
+    const h = live.env?.humidity;
+    cards.push(
+      {
+        p: "temperature", label: "Suhu panel", value: t != null ? fmtNum(t, 1) : "—", unit: "°C",
+        limit: th.tempMax != null ? `Peringatan > ${fmtNum(th.tempMax, 0)} °C · tidak memicu trip` : "Tidak memicu trip",
+        alert: t != null && th.tempMax != null && t > th.tempMax,
+      },
+      { p: "humidity", label: "Kelembapan", value: h != null ? fmtNum(h, 0) : "—", unit: "%", limit: "Hanya pemantauan", alert: false },
+    );
+  }
 
   const statusBadge = {
     normal: <Badge tone="success">Normal</Badge>,
@@ -137,13 +150,13 @@ function Inner() {
                 <Switch
                   label={`Relai ${jalurLabel(j)}`}
                   checked={j.relayOn}
-                  onChange={(next) => (next ? actions.setRelay(j.id, true) : setConfirmOff(true))}
+                  onChange={(next) => setConfirmRelay(next ? "on" : "off")}
                 />
                 <span className="text-[13px] font-medium text-fg-2">{j.relayOn ? "Relai ON" : "Relai OFF"}</span>
               </div>
             </div>
             {status === "trip" && (
-              <Button variant="danger" onClick={() => actions.setRelay(j.id, true)}>
+              <Button variant="danger" onClick={() => setConfirmRelay("on")}>
                 Nyalakan kembali
               </Button>
             )}
@@ -156,7 +169,7 @@ function Inner() {
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger" />
           <div className="min-w-0 flex-1">
             <p className="font-bold text-danger">
-              Relai diputus {trip.cutSource === "manual" ? "manual" : trip.cutSource === "failsafe" ? "oleh pengaman" : "otomatis"} karena {trip.param.toLowerCase()} berlebih
+              Relai diputus {trip.cutSource === "manual" ? "manual" : trip.cutSource === "failsafe" ? "oleh pengaman" : trip.cutSource === "local" ? "oleh proteksi lokal ESP32" : "otomatis"} karena {trip.param.toLowerCase()} berlebih
             </p>
             <p className="mt-0.5 text-[13px] text-danger">{trip.note}</p>
           </div>
@@ -207,7 +220,7 @@ function Inner() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className={cn("grid grid-cols-2 gap-3", isLive ? "md:grid-cols-4" : "md:grid-cols-3 xl:grid-cols-6")}>
         {cards.map((c) => {
           const s = c.p === "energy" ? null : stats?.[c.p];
           return (
@@ -221,7 +234,7 @@ function Inner() {
               minMax={
                 c.p === "energy" || !s
                   ? "— / —"
-                  : `${fmtNum(s.min, PARAM_META[c.p].digits)} / ${fmtNum(s.max, PARAM_META[c.p].digits)}`
+                  : `${fmtSmart(s.min, PARAM_META[c.p].digits)} / ${fmtSmart(s.max, PARAM_META[c.p].digits)}`
               }
             />
           );
@@ -272,7 +285,7 @@ function Inner() {
 
       <ThresholdForm key={j.thresholdsChangedAt + j.id} jalur={j} />
 
-      <ConfirmRelayOff jalur={confirmOff ? j : null} onClose={() => setConfirmOff(false)} />
+      <ConfirmRelay jalur={confirmRelay ? j : null} action={confirmRelay} onClose={() => setConfirmRelay(null)} />
     </div>
   );
 }
